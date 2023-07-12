@@ -33,7 +33,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     private val drawer = SVGACanvasDrawer(videoItem, dynamicItem)
 
-    override fun draw(canvas: Canvas?) {
+    override fun draw(canvas: Canvas) {
         if (cleared) {
             return
         }
@@ -56,7 +56,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     fun resume() {
         videoItem.audioList.forEach { audio ->
-            audio.playID?.let {
+            audio.playIDs?.map {
                 if (SVGASoundManager.isInit()){
                     SVGASoundManager.resume(it)
                 }else{
@@ -68,7 +68,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     fun pause() {
         videoItem.audioList.forEach { audio ->
-            audio.playID?.let {
+            audio.playIDs?.map {
                 if (SVGASoundManager.isInit()){
                     SVGASoundManager.pause(it)
                 }else{
@@ -80,7 +80,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     fun stop() {
         videoItem.audioList.forEach { audio ->
-            audio.playID?.let {
+            audio.playIDs?.map {
                 if (SVGASoundManager.isInit()){
                     SVGASoundManager.stop(it)
                 }else{
@@ -92,14 +92,14 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     fun clear() {
         videoItem.audioList.forEach { audio ->
-            audio.playID?.let {
+            audio.playIDs?.map {
                 if (SVGASoundManager.isInit()){
                     SVGASoundManager.stop(it)
                 }else{
                     videoItem.soundPool?.stop(it)
                 }
             }
-            audio.playID = null
+            audio.playIDs = null
         }
         videoItem.clear()
     }

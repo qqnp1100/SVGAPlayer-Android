@@ -104,8 +104,9 @@ object SVGASoundManager {
         val soundPool = soundPool ?: return
 
         entity.audioList.forEach { audio ->
-            val streamId = audio.playID ?: return
-            soundPool.setVolume(streamId, volume, volume)
+            audio.playIDs?.map {
+                soundPool.setVolume(it, volume, volume)
+            }
         }
     }
 

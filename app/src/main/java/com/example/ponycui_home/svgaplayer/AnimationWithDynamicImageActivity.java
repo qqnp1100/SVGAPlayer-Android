@@ -1,9 +1,9 @@
 package com.example.ponycui_home.svgaplayer;
 
-import android.app.Activity;
 import android.graphics.Color;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
 
 import com.opensource.svgaplayer.SVGADrawable;
 import com.opensource.svgaplayer.SVGADynamicEntity;
@@ -13,11 +13,10 @@ import com.opensource.svgaplayer.SVGAVideoEntity;
 
 import org.jetbrains.annotations.NotNull;
 
-import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URL;
 
-public class AnimationWithDynamicImageActivity extends Activity {
+public class AnimationWithDynamicImageActivity extends AppCompatActivity {
 
     SVGAImageView animationView = null;
 

@@ -1,7 +1,6 @@
 package com.opensource.svgaplayer.entities
 
 import com.opensource.svgaplayer.proto.AudioEntity
-import java.io.FileInputStream
 
 internal class SVGAAudioEntity {
 
@@ -11,7 +10,11 @@ internal class SVGAAudioEntity {
     val startTime: Int
     val totalTime: Int
     var soundID: Int? = null
-    var playID: Int? = null
+        set(value) {
+            field = value
+            playIDs = HashSet()
+        }
+    var playIDs: HashSet<Int>? = null
 
     constructor(audioItem: AudioEntity) {
         this.audioKey = audioItem.audioKey

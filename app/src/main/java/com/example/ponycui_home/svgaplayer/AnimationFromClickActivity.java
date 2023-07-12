@@ -1,9 +1,9 @@
 package com.example.ponycui_home.svgaplayer;
 
-import android.app.Activity;
 import android.graphics.Color;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
 import android.widget.Toast;
 
 import com.opensource.svgaplayer.SVGAClickAreaListener;
@@ -20,7 +20,7 @@ import org.jetbrains.annotations.NotNull;
  * Created by miaojun on 2019/6/21.
  * mail:1290846731@qq.com
  */
-public class AnimationFromClickActivity extends Activity {
+public class AnimationFromClickActivity extends AppCompatActivity {
 
     SVGAImageView animationView = null;
 
