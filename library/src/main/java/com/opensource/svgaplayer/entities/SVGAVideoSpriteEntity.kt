@@ -57,4 +57,9 @@ internal class SVGAVideoSpriteEntity {
 
     }
 
+    fun clear() {
+        frames.map {
+            it.clear()
+        }
+    }
 }

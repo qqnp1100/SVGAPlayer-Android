@@ -140,6 +140,9 @@ class SVGADynamicEntity {
     fun clearDynamicObjects() {
         this.isTextDirty = true
         this.dynamicHidden.clear()
+        dynamicImage.map {
+            it.value.recycle()
+        }
         this.dynamicImage.clear()
         this.dynamicText.clear()
         this.dynamicTextPaint.clear()

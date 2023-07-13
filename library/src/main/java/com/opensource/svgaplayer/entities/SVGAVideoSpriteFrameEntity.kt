@@ -20,7 +20,12 @@ internal class SVGAVideoSpriteFrameEntity {
     constructor(obj: JSONObject) {
         this.alpha = obj.optDouble("alpha", 0.0)
         obj.optJSONObject("layout")?.let {
-            layout = SVGARect(it.optDouble("x", 0.0), it.optDouble("y", 0.0), it.optDouble("width", 0.0), it.optDouble("height", 0.0))
+            layout = SVGARect(
+                it.optDouble("x", 0.0),
+                it.optDouble("y", 0.0),
+                it.optDouble("width", 0.0),
+                it.optDouble("height", 0.0)
+            )
         }
         obj.optJSONObject("transform")?.let {
             val arr = FloatArray(9)
@@ -60,9 +65,11 @@ internal class SVGAVideoSpriteFrameEntity {
     constructor(obj: FrameEntity) {
         this.alpha = (obj.alpha ?: 0.0f).toDouble()
         obj.layout?.let {
-            this.layout = SVGARect((it.x ?: 0.0f).toDouble(), (it.y
+            this.layout = SVGARect(
+                (it.x ?: 0.0f).toDouble(), (it.y
                     ?: 0.0f).toDouble(), (it.width ?: 0.0f).toDouble(), (it.height
-                    ?: 0.0f).toDouble())
+                    ?: 0.0f).toDouble()
+            )
         }
         obj.transform?.let {
             val arr = FloatArray(9)
@@ -91,4 +98,10 @@ internal class SVGAVideoSpriteFrameEntity {
         }
     }
 
+    fun clear() {
+        shapes.map {
+            it.clear()
+        }
+        shapes = emptyList()
+    }
 }

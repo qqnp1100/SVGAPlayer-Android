@@ -340,7 +340,13 @@ class SVGAVideoEntity {
         soundPool?.release()
         soundPool = null
         audioList = emptyList()
+        spriteList.map {
+            it.clear()
+        }
         spriteList = emptyList()
+        imageMap.map {
+            it.value.recycle()
+        }
         imageMap.clear()
     }
 }
