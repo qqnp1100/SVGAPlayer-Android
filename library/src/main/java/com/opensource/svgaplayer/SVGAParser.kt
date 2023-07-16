@@ -283,7 +283,13 @@ class SVGAParser(context: Context?) {
                 FileInputStream(SVGACache.buildSvgaFile(cacheKey)).use { inputStream ->
                     readAsBytes(inputStream)?.let { bytes ->
                         if (isZipFile(bytes)) {
-                            this.decodeFromCacheKey(cacheKey, callback, alias)
+                            this.decodeFromCacheKey(
+                                cacheKey,
+                                callback,
+                                alias,
+                                bitmapWidth,
+                                bitmapHeight
+                            )
                         } else {
                             LogUtils.info(TAG, "inflate start")
                             inflate(bytes)?.let {
@@ -358,7 +364,13 @@ class SVGAParser(context: Context?) {
                                 }
                             }
                         }
-                        this.decodeFromCacheKey(cacheKey, callback, alias)
+                        this.decodeFromCacheKey(
+                            cacheKey,
+                            callback,
+                            alias,
+                            bitmapWidth,
+                            bitmapHeight
+                        )
                     } else {
                         if (!SVGACache.isDefaultCache()) {
                             // 如果 SVGACache 设置类型为 FILE
