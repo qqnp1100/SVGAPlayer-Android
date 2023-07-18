@@ -5,8 +5,6 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
 import android.os.Build
-import com.opensource.svgaplayer.bitmap.SVGABitmapByteArrayDecoder
-import com.opensource.svgaplayer.bitmap.SVGABitmapFileDecoder
 import com.opensource.svgaplayer.entities.SVGAAudioEntity
 import com.opensource.svgaplayer.entities.SVGAVideoSpriteEntity
 import com.opensource.svgaplayer.proto.AudioEntity
@@ -146,9 +144,8 @@ class SVGAVideoEntity {
     }
 
     private fun createBitmap(filePath: String): Bitmap? {
-        return SVGABitmapFileDecoder.decodeBitmapFrom(
-            filePath,
-            mFrameWidth,
+        return SVGAParser.getBitmapDecoder().onLoad(
+            filePath, mFrameWidth,
             mFrameHeight,
             videoSize.width.toInt(),
             videoSize.height.toInt()
@@ -174,9 +171,8 @@ class SVGAVideoEntity {
 
     private fun createBitmap(byteArray: ByteArray, filePath: String): Bitmap? {
         val bitmap =
-            SVGABitmapByteArrayDecoder.decodeBitmapFrom(
-                byteArray,
-                mFrameWidth,
+            SVGAParser.getBitmapDecoder().onLoad(
+                byteArray, mFrameWidth,
                 mFrameHeight,
                 videoSize.width.toInt(),
                 videoSize.height.toInt()
@@ -363,7 +359,7 @@ class SVGAVideoEntity {
         }
         spriteList = emptyList()
         imageMap.map {
-            it.value.recycle()
+            SVGAParser.getBitmapDecoder().onClean(it.value)
         }
         imageMap.clear()
     }

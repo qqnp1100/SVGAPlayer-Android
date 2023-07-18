@@ -17,12 +17,12 @@ internal abstract class SVGABitmapDecoder<T> {
         data: T,
         reqWidth: Int,
         reqHeight: Int,
-        svgaWidth: Int,
-        svgaHeight: Int
+        videoWidth: Int,
+        videoHeight: Int
     ): Bitmap? {
         return BitmapFactory.Options().run {
             // 如果期望的宽高是合法的, 则开启检测尺寸模式
-            inJustDecodeBounds = reqWidth < svgaWidth || reqHeight < svgaHeight
+            inJustDecodeBounds = reqWidth < videoWidth || reqHeight < videoHeight
             inPreferredConfig = Bitmap.Config.RGB_565
 
             val bitmap = onDecode(data, this)
@@ -35,8 +35,8 @@ internal abstract class SVGABitmapDecoder<T> {
                 this,
                 reqWidth,
                 reqHeight,
-                svgaWidth,
-                svgaHeight
+                videoWidth,
+                videoHeight
             )
             // Decode bitmap with inSampleSize set
             inJustDecodeBounds = false

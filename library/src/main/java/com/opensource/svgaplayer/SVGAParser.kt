@@ -1,9 +1,12 @@
 package com.opensource.svgaplayer
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.http.HttpResponseCache
 import android.os.Handler
 import android.os.Looper
+import com.opensource.svgaplayer.bitmap.SVGABitmapByteArrayDecoder
+import com.opensource.svgaplayer.bitmap.SVGABitmapFileDecoder
 import com.opensource.svgaplayer.proto.MovieEntity
 import com.opensource.svgaplayer.utils.log.LogUtils
 import org.json.JSONObject
@@ -123,11 +126,68 @@ class SVGAParser(context: Context?) {
 
     var fileDownloader = FileDownloader()
 
+    open interface BitmapDecoder {
+        fun onLoad(
+            path: String,
+            frameWidth: Int,
+            frameHeight: Int,
+            videoWidth: Int,
+            videoHeight: Int
+        ): Bitmap?
+
+        fun onLoad(
+            byteArray: ByteArray,
+            frameWidth: Int,
+            frameHeight: Int,
+            videoWidth: Int,
+            videoHeight: Int
+        ): Bitmap?
+
+        fun onClean(bitmap: Bitmap)
+    }
+
     companion object {
         private const val TAG = "SVGAParser"
 
         private val threadNum = AtomicInteger(0)
         private var mShareParser = SVGAParser(null)
+        private var customBitmapDecoder: BitmapDecoder = object : BitmapDecoder {
+            override fun onLoad(
+                path: String,
+                frameWidth: Int,
+                frameHeight: Int,
+                videoWidth: Int,
+                videoHeight: Int
+            ): Bitmap? {
+                return SVGABitmapFileDecoder.decodeBitmapFrom(
+                    path,
+                    frameWidth,
+                    frameHeight,
+                    videoWidth,
+                    videoHeight
+                )
+            }
+
+            override fun onLoad(
+                byteArray: ByteArray,
+                frameWidth: Int,
+                frameHeight: Int,
+                videoWidth: Int,
+                videoHeight: Int
+            ): Bitmap? {
+                return SVGABitmapByteArrayDecoder.decodeBitmapFrom(
+                    byteArray,
+                    frameWidth,
+                    frameHeight,
+                    videoWidth,
+                    videoHeight
+                )
+            }
+
+            override fun onClean(bitmap: Bitmap) {
+                bitmap.recycle()
+            }
+        }
 
         internal var threadPoolExecutor = Executors.newCachedThreadPool { r ->
             Thread(r, "SVGAParser-Thread-${threadNum.getAndIncrement()}")
@@ -140,6 +200,14 @@ class SVGAParser(context: Context?) {
         fun shareParser(): SVGAParser {
             return mShareParser
         }
+
+        fun setBitmapDecoder(customBitmapDecoder: BitmapDecoder) {
+            this.customBitmapDecoder = customBitmapDecoder
+        }
+
+        fun getBitmapDecoder(): BitmapDecoder = customBitmapDecoder
+
+
     }
 
     fun init(context: Context) {
