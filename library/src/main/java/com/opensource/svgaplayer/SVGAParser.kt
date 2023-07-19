@@ -8,6 +8,7 @@ import android.os.Looper
 import com.opensource.svgaplayer.bitmap.SVGABitmapByteArrayDecoder
 import com.opensource.svgaplayer.bitmap.SVGABitmapFileDecoder
 import com.opensource.svgaplayer.proto.MovieEntity
+import com.opensource.svgaplayer.utils.MyByteArrayOutputStream
 import com.opensource.svgaplayer.utils.log.LogUtils
 import org.json.JSONObject
 import java.io.*
@@ -53,7 +54,7 @@ class SVGAParser(context: Context?) {
 
         open fun resume(
             url: URL,
-            complete: (inputStream: InputStream) -> Unit,
+            complete: (bytes: ByteArray) -> Unit,
             failure: (e: Exception) -> Unit
         ): () -> Unit {
             var cancelled = false
@@ -103,13 +104,11 @@ class SVGAParser(context: Context?) {
                                     )
                                     return@execute
                                 }
-                                ByteArrayInputStream(outputStream.toByteArray()).use {
-                                    LogUtils.info(
-                                        TAG,
-                                        "================ svga file download complete ================"
-                                    )
-                                    complete(it)
-                                }
+                                LogUtils.info(
+                                    TAG,
+                                    "================ svga file download complete ================"
+                                )
+                                complete(outputStream.toByteArray())
                             }
                         }
                     }
@@ -309,11 +308,10 @@ class SVGAParser(context: Context?) {
         } else {
             LogUtils.info(TAG, "no cached, prepare to download")
             fileDownloader.resume(url, {
-                this.decodeFromInputStream(
+                this.decodeFromBytes(
                     it,
                     cacheKey,
                     callback,
-                    false,
                     playCallback,
                     alias = urlPath,
                     frameWidth,
@@ -392,6 +390,93 @@ class SVGAParser(context: Context?) {
                 LogUtils.info(
                     TAG,
                     "================ decode $alias from svga cachel file to entity end ================"
+                )
+            }
+        }
+    }
+
+    fun decodeFromBytes(
+        bytes: ByteArray,
+        cacheKey: String,
+        callback: ParseCompletion?,
+        playCallback: PlayCallback? = null,
+        alias: String? = null,
+        frameWidth: Int = 0,
+        frameHeight: Int = 0
+    ) {
+        if (mContext == null) {
+            LogUtils.error(TAG, "在配置 SVGAParser context 前, 无法解析 SVGA 文件。")
+            return
+        }
+        val bitmapWidth = if (frameWidth > 0) frameWidth else mFrameWidth
+        val bitmapHeight = if (frameHeight > 0) frameHeight else mFrameHeight
+        LogUtils.info(TAG, "================ decode $alias from bytes ================")
+        threadPoolExecutor.execute {
+            try {
+                if (isZipFile(bytes)) {
+                    LogUtils.info(TAG, "decode from zip file")
+                    if (!SVGACache.buildCacheDir(cacheKey).exists() || isUnzipping) {
+                        synchronized(fileLock) {
+                            if (!SVGACache.buildCacheDir(cacheKey).exists()) {
+                                isUnzipping = true
+                                LogUtils.info(TAG, "no cached, prepare to unzip")
+                                ByteArrayInputStream(bytes).use {
+                                    unzip(it, cacheKey)
+                                    isUnzipping = false
+                                    LogUtils.info(TAG, "unzip success")
+                                }
+                            }
+                        }
+                    }
+                    this.decodeFromCacheKey(
+                        cacheKey,
+                        callback,
+                        alias,
+                        bitmapWidth,
+                        bitmapHeight
+                    )
+                } else {
+                    if (!SVGACache.isDefaultCache()) {
+                        // 如果 SVGACache 设置类型为 FILE
+                        threadPoolExecutor.execute {
+                            SVGACache.buildSvgaFile(cacheKey).let { cacheFile ->
+                                try {
+                                    cacheFile.takeIf { !it.exists() }?.createNewFile()
+                                    FileOutputStream(cacheFile).write(bytes)
+                                } catch (e: Exception) {
+                                    LogUtils.error(TAG, "create cache file fail.", e)
+                                    cacheFile.delete()
+                                }
+                            }
+                        }
+                    }
+                    LogUtils.info(TAG, "inflate start")
+                    inflate(bytes)?.let {
+                        LogUtils.info(TAG, "inflate complete")
+                        val videoItem = SVGAVideoEntity(
+                            MovieEntity.ADAPTER.decode(it),
+                            File(cacheKey),
+                            bitmapWidth,
+                            bitmapHeight
+                        )
+                        LogUtils.info(TAG, "SVGAVideoEntity prepare start")
+                        videoItem.prepare({
+                            LogUtils.info(TAG, "SVGAVideoEntity prepare success")
+                            this.invokeCompleteCallback(videoItem, callback, alias)
+                        }, playCallback)
+
+                    } ?: this.invokeErrorCallback(
+                        Exception("inflate(bytes) cause exception"),
+                        callback,
+                        alias
+                    )
+                }
+            } catch (e: Exception) {
+                this.invokeErrorCallback(e, callback, alias)
+            } finally {
+                LogUtils.info(
+                    TAG,
+                    "================ decode $alias from bytes end ================"
                 )
             }
         }
@@ -601,7 +686,12 @@ class SVGAParser(context: Context?) {
                 try {
                     LogUtils.info(TAG, "spec change to entity")
                     FileInputStream(jsonFile).use { fileInputStream ->
-                        ByteArrayOutputStream().use { byteArrayOutputStream ->
+                        ByteArrayOutputStream(
+                            Math.max(
+                                fileInputStream.available(),
+                                32
+                            )
+                        ).use { byteArrayOutputStream ->
                             val buffer = ByteArray(2048)
                             while (true) {
                                 val size = fileInputStream.read(buffer, 0, buffer.size)
@@ -640,7 +730,12 @@ class SVGAParser(context: Context?) {
     }
 
     private fun readAsBytes(inputStream: InputStream): ByteArray? {
-        ByteArrayOutputStream().use { byteArrayOutputStream ->
+        MyByteArrayOutputStream(
+            Math.max(
+                inputStream.available(),
+                32
+            )
+        ).use { byteArrayOutputStream ->
             val byteArray = ByteArray(2048)
             while (true) {
                 val count = inputStream.read(byteArray, 0, 2048)
@@ -650,7 +745,7 @@ class SVGAParser(context: Context?) {
                     byteArrayOutputStream.write(byteArray, 0, count)
                 }
             }
-            return byteArrayOutputStream.toByteArray()
+            return byteArrayOutputStream.toUnSafeByteArray()
         }
     }
 
@@ -658,7 +753,7 @@ class SVGAParser(context: Context?) {
         val inflater = Inflater()
         inflater.setInput(byteArray, 0, byteArray.size)
         val inflatedBytes = ByteArray(2048)
-        ByteArrayOutputStream().use { inflatedOutputStream ->
+        MyByteArrayOutputStream().use { inflatedOutputStream ->
             while (true) {
                 val count = inflater.inflate(inflatedBytes, 0, 2048)
                 if (count <= 0) {
@@ -668,7 +763,9 @@ class SVGAParser(context: Context?) {
                 }
             }
             inflater.end()
-            return inflatedOutputStream.toByteArray()
+            val b = inflatedOutputStream.toByteArray()
+            inflatedOutputStream.reset()
+            return b
         }
     }
 
