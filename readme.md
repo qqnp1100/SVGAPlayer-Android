@@ -1,3 +1,62 @@
+# 本分支修改内容（基于2.6.1版本修改）
+- SVGAVideoEntity 增加 imageMapSize方法
+- SVGAParser decode方法增加宽高参数，可以每次加载svga都设定不同宽高了
+    ```
+    fun decodeFromURL(
+        url: URL,
+        callback: ParseCompletion?,
+        playCallback: PlayCallback? = null,
+        frameWidth: Int = 0,
+        frameHeight: Int = 0
+    )
+    ```
+- 增加setBitmapDecoder 可以自定义bitmap解析
+    ```
+    SVGAParser.setBitmapDecoder(object :SVGAParser.BitmapDecoder{
+            override fun onLoad(
+                path: String,
+                frameWidth: Int,
+                frameHeight: Int,
+                videoWidth: Int,
+                videoHeight: Int
+            ): Bitmap? {
+
+            }
+
+            override fun onLoad(
+                byteArray: ByteArray,
+                frameWidth: Int,
+                frameHeight: Int,
+                videoWidth: Int,
+                videoHeight: Int
+            ): Bitmap? {
+            }
+
+            override fun onClean(bitmap: Bitmap) {
+            }
+        })
+    ```
+- 一些内存释放的优化
+# 本分支集成方式
+
+Step 1. Add the JitPack repository to your build file
+Add it in your root build.gradle at the end of repositories:
+
+	allprojects {
+		repositories {
+			...
+			maven { url 'https://www.jitpack.io' }
+		}
+	}
+Step 2. Add the dependency [![](https://jitpack.io/v/qqnp1100/SVGAPlayer-Android.svg)](https://jitpack.io/#qqnp1100/VideoCompressor)
+
+	dependencies {
+            //请自行改为最新版本
+	        implementation 'com.github.qqnp1100:SVGAPlayer-Android:1.0.0'
+	}
+
+
+
 # Archived
 本仓库已经停止维护，你仍然继续阅读源码及创建分叉，但本仓库不会继续更新，也不会回答任何 issue。
 
