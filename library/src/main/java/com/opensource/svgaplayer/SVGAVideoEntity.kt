@@ -344,6 +344,14 @@ class SVGAVideoEntity {
         }
     }
 
+    fun imageMapSize(): Int {
+        var total = 0
+        imageMap.map {
+            total += it.value.width * it.value.height * 4
+        }
+        return total
+    }
+
     fun clear() {
         if (SVGASoundManager.isInit()) {
             this.audioList.forEach {

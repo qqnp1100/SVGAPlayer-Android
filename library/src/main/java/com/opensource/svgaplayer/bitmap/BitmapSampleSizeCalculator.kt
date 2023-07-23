@@ -28,8 +28,8 @@ internal object BitmapSampleSizeCalculator {
             return inSampleSize
         }
 
-        val targetWidth = width * reqWidth / svgaWidth
-        val targetHeight = height * reqHeight / svgaHeight
+        val targetWidth = Math.max(width * reqWidth / svgaWidth, 1)
+        val targetHeight = Math.max(height * reqHeight / svgaHeight, 1)
 
 
         if (height > targetHeight || width > targetWidth) {
