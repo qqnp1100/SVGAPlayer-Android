@@ -200,8 +200,8 @@ class SVGAVideoEntity {
             for (i in 0 until item.length()) {
                 item.optJSONObject(i)?.let { entryJson ->
                     val entity = SVGAVideoSpriteEntity(entryJson)
-                    var matrixMaxScaleX = 0f
-                    var matrixMaxScaleY = 0f
+                    var matrixMaxScaleX = 1f
+                    var matrixMaxScaleY = 1f
                     entity.frames.map { e ->
                         val f = FloatArray(9)
                         e.transform.getValues(f)
@@ -224,8 +224,8 @@ class SVGAVideoEntity {
 
     private fun resetSprites(entity: MovieEntity) {
         spriteList = entity.sprites?.map {
-            var matrixMaxScaleX = 0f
-            var matrixMaxScaleY = 0f
+            var matrixMaxScaleX = 1f
+            var matrixMaxScaleY = 1f
             val entity = SVGAVideoSpriteEntity(it)
             entity.frames.map { e ->
                 val f = FloatArray(9)
