@@ -126,16 +126,35 @@ class SVGAParser(context: Context?) {
     var fileDownloader = FileDownloader()
 
     open interface BitmapDecoder {
+        /**
+         * @param scaleX      图片显示中最大的缩放
+         * @param scaleY      图片显示中最大的缩放
+         * @param frameWidth  加载设置的宽
+         * @param frameHeight 加载设置的高
+         * @param videoWidth  svga的宽
+         * @param videoHeight svga的高
+         */
         fun onLoad(
             path: String,
+            scaleX: Float,
+            scaleY: Float,
             frameWidth: Int,
             frameHeight: Int,
             videoWidth: Int,
             videoHeight: Int
         ): Bitmap?
-
+        /**
+         * @param scaleX      图片显示中最大的缩放
+         * @param scaleY      图片显示中最大的缩放
+         * @param frameWidth  加载设置的宽
+         * @param frameHeight 加载设置的高
+         * @param videoWidth  svga的宽
+         * @param videoHeight svga的高
+         */
         fun onLoad(
             byteArray: ByteArray,
+            scaleX: Float,
+            scaleY: Float,
             frameWidth: Int,
             frameHeight: Int,
             videoWidth: Int,
@@ -153,6 +172,8 @@ class SVGAParser(context: Context?) {
         private var customBitmapDecoder: BitmapDecoder = object : BitmapDecoder {
             override fun onLoad(
                 path: String,
+                scaleX: Float,
+                scaleY: Float,
                 frameWidth: Int,
                 frameHeight: Int,
                 videoWidth: Int,
@@ -160,6 +181,8 @@ class SVGAParser(context: Context?) {
             ): Bitmap? {
                 return SVGABitmapFileDecoder.decodeBitmapFrom(
                     path,
+                    scaleX,
+                    scaleY,
                     frameWidth,
                     frameHeight,
                     videoWidth,
@@ -169,6 +192,8 @@ class SVGAParser(context: Context?) {
 
             override fun onLoad(
                 byteArray: ByteArray,
+                scaleX: Float,
+                scaleY: Float,
                 frameWidth: Int,
                 frameHeight: Int,
                 videoWidth: Int,
@@ -176,6 +201,8 @@ class SVGAParser(context: Context?) {
             ): Bitmap? {
                 return SVGABitmapByteArrayDecoder.decodeBitmapFrom(
                     byteArray,
+                    scaleX,
+                    scaleY,
                     frameWidth,
                     frameHeight,
                     videoWidth,

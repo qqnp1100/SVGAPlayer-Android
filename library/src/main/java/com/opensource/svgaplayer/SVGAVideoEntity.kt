@@ -1,6 +1,7 @@
 package com.opensource.svgaplayer
 
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
@@ -17,7 +18,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.*
-import kotlin.collections.ArrayList
 
 /**
  * Created by PonyCui on 16/6/18.
@@ -38,6 +38,7 @@ class SVGAVideoEntity {
     var frames: Int = 0
         private set
 
+    internal var scaleMap = HashMap<String, Pair<Float, Float>>()
     internal var spriteList: List<SVGAVideoSpriteEntity> = emptyList()
     internal var audioList: List<SVGAAudioEntity> = emptyList()
     internal var soundPool: SoundPool? = null
@@ -57,6 +58,7 @@ class SVGAVideoEntity {
         mCacheDir = cacheDir
         val movieJsonObject = json.optJSONObject("movie") ?: return
         setupByJson(movieJsonObject)
+        resetSprites(json)
         try {
             parserImages(json)
         } catch (e: Exception) {
@@ -64,7 +66,6 @@ class SVGAVideoEntity {
         } catch (e: OutOfMemoryError) {
             e.printStackTrace()
         }
-        resetSprites(json)
     }
 
     private fun setupByJson(movieObject: JSONObject) {
@@ -85,6 +86,7 @@ class SVGAVideoEntity {
         this.mCacheDir = cacheDir
         this.movieItem = entity
         entity.params?.let(this::setupByMovie)
+        resetSprites(entity)
         try {
             parserImages(entity)
         } catch (e: Exception) {
@@ -92,7 +94,6 @@ class SVGAVideoEntity {
         } catch (e: OutOfMemoryError) {
             e.printStackTrace()
         }
-        resetSprites(entity)
     }
 
     private fun setupByMovie(movieParams: MovieParams) {
@@ -123,7 +124,8 @@ class SVGAVideoEntity {
                 return
             }
             val bitmapKey = imgKey.replace(".matte", "")
-            val bitmap = createBitmap(filePath)
+            val maxScale = scaleMap[imgKey] ?: Pair(1f, 1f)
+            val bitmap = createBitmap(filePath, maxScale.first, maxScale.second)
             if (bitmap != null) {
                 imageMap[bitmapKey] = bitmap
             }
@@ -143,9 +145,12 @@ class SVGAVideoEntity {
         }
     }
 
-    private fun createBitmap(filePath: String): Bitmap? {
+    private fun createBitmap(filePath: String, scaleX: Float, scaleY: Float): Bitmap? {
         return SVGAParser.getBitmapDecoder().onLoad(
-            filePath, mFrameWidth,
+            filePath,
+            scaleX,
+            scaleY,
+            mFrameWidth,
             mFrameHeight,
             videoSize.width.toInt(),
             videoSize.height.toInt()
@@ -163,21 +168,30 @@ class SVGAVideoEntity {
                 return@forEach
             }
             val filePath = generateBitmapFilePath(entry.value.utf8(), entry.key)
-            createBitmap(byteArray, filePath)?.let { bitmap ->
+            val maxScale = scaleMap[entry.key] ?: Pair(1f, 1f)
+            createBitmap(byteArray, filePath, maxScale.first, maxScale.second)?.let { bitmap ->
                 imageMap[entry.key] = bitmap
             }
         }
     }
 
-    private fun createBitmap(byteArray: ByteArray, filePath: String): Bitmap? {
+    private fun createBitmap(
+        byteArray: ByteArray,
+        filePath: String,
+        scaleX: Float,
+        scaleY: Float
+    ): Bitmap? {
         val bitmap =
             SVGAParser.getBitmapDecoder().onLoad(
-                byteArray, mFrameWidth,
+                byteArray,
+                scaleX,
+                scaleY,
+                mFrameWidth,
                 mFrameHeight,
                 videoSize.width.toInt(),
                 videoSize.height.toInt()
             )
-        return bitmap ?: createBitmap(filePath)
+        return bitmap ?: createBitmap(filePath, scaleX, scaleY)
     }
 
     private fun resetSprites(json: JSONObject) {
@@ -185,7 +199,23 @@ class SVGAVideoEntity {
         json.optJSONArray("sprites")?.let { item ->
             for (i in 0 until item.length()) {
                 item.optJSONObject(i)?.let { entryJson ->
-                    mutableList.add(SVGAVideoSpriteEntity(entryJson))
+                    val entity = SVGAVideoSpriteEntity(entryJson)
+                    var matrixMaxScaleX = 0f
+                    var matrixMaxScaleY = 0f
+                    entity.frames.map { e ->
+                        val f = FloatArray(9)
+                        e.transform.getValues(f)
+                        val scaleX = f[Matrix.MSCALE_X]
+                        val scaleY = f[Matrix.MSCALE_Y]
+                        if (scaleX > matrixMaxScaleX) {
+                            matrixMaxScaleX = scaleX
+                        }
+                        if (scaleY > matrixMaxScaleY) {
+                            matrixMaxScaleY = scaleY
+                        }
+                    }
+                    scaleMap[entity.imageKey ?: ""] = Pair(matrixMaxScaleX, matrixMaxScaleY)
+                    mutableList.add(entity)
                 }
             }
         }
@@ -194,7 +224,23 @@ class SVGAVideoEntity {
 
     private fun resetSprites(entity: MovieEntity) {
         spriteList = entity.sprites?.map {
-            return@map SVGAVideoSpriteEntity(it)
+            var matrixMaxScaleX = 0f
+            var matrixMaxScaleY = 0f
+            val entity = SVGAVideoSpriteEntity(it)
+            entity.frames.map { e ->
+                val f = FloatArray(9)
+                e.transform.getValues(f)
+                val scaleX = f[Matrix.MSCALE_X]
+                val scaleY = f[Matrix.MSCALE_Y]
+                if (scaleX > matrixMaxScaleX) {
+                    matrixMaxScaleX = scaleX
+                }
+                if (scaleY > matrixMaxScaleY) {
+                    matrixMaxScaleY = scaleY
+                }
+            }
+            scaleMap[entity.imageKey ?: ""] = Pair(matrixMaxScaleX, matrixMaxScaleY)
+            return@map entity
         } ?: listOf()
     }
 
@@ -370,6 +416,7 @@ class SVGAVideoEntity {
             SVGAParser.getBitmapDecoder().onClean(it.value)
         }
         imageMap.clear()
+        scaleMap.clear()
     }
 }
 
