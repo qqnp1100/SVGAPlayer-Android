@@ -4,7 +4,6 @@ import androidx.appcompat.app.AppCompatActivity
 import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
-import com.example.ponycui_home.svgaplayer.svga.loadWithCache
 import com.opensource.svgaplayer.SVGAImageView
 import com.opensource.svgaplayer.SVGAParser.Companion.shareParser
 import com.opensource.svgaplayer.SVGAParser.ParseCompletion
