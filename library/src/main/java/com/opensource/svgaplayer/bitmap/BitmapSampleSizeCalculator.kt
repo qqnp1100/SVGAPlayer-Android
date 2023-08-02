@@ -11,6 +11,8 @@ internal object BitmapSampleSizeCalculator {
 
     fun calculate(
         options: BitmapFactory.Options,
+        scaleX: Float,
+        scaleY: Float,
         reqWidth: Int,
         reqHeight: Int,
         svgaWidth: Int,
@@ -18,7 +20,8 @@ internal object BitmapSampleSizeCalculator {
     ): Int {
 
         // Raw height and width of image
-        val (height: Int, width: Int) = options.run { outHeight to outWidth }
+        val height = (options.outHeight * scaleY).toInt()
+        val width = (options.outWidth * scaleX).toInt()
         var inSampleSize = 1
 
         if (reqHeight <= 0 || reqWidth <= 0) {

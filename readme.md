@@ -48,7 +48,7 @@ Add it in your root build.gradle at the end of repositories:
 			maven { url 'https://www.jitpack.io' }
 		}
 	}
-Step 2. Add the dependency [![](https://jitpack.io/v/qqnp1100/SVGAPlayer-Android.svg)](https://jitpack.io/#qqnp1100/VideoCompressor)
+Step 2. Add the dependency [![](https://jitpack.io/v/qqnp1100/SVGAPlayer-Android.svg)](https://jitpack.io/#qqnp1100/SVGAPlayer-Android)
 
 	dependencies {
             //请自行改为最新版本
