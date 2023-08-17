@@ -301,19 +301,19 @@ open class SVGAImageView @JvmOverloads constructor(
     private class AnimatorListener(view: SVGAImageView) : Animator.AnimatorListener {
         private val weakReference = WeakReference<SVGAImageView>(view)
 
-        override fun onAnimationRepeat(animation: Animator?) {
+        override fun onAnimationRepeat(animation: Animator) {
             weakReference.get()?.callback?.onRepeat()
         }
 
-        override fun onAnimationEnd(animation: Animator?) {
+        override fun onAnimationEnd(animation: Animator) {
             weakReference.get()?.onAnimationEnd(animation)
         }
 
-        override fun onAnimationCancel(animation: Animator?) {
+        override fun onAnimationCancel(animation: Animator) {
             weakReference.get()?.isAnimating = false
         }
 
-        override fun onAnimationStart(animation: Animator?) {
+        override fun onAnimationStart(animation: Animator) {
             weakReference.get()?.isAnimating = true
         }
     } // end of AnimatorListener
@@ -322,7 +322,7 @@ open class SVGAImageView @JvmOverloads constructor(
     private class AnimatorUpdateListener(view: SVGAImageView) : ValueAnimator.AnimatorUpdateListener {
         private val weakReference = WeakReference<SVGAImageView>(view)
 
-        override fun onAnimationUpdate(animation: ValueAnimator?) {
+        override fun onAnimationUpdate(animation: ValueAnimator) {
             weakReference.get()?.onAnimatorUpdate(animation)
         }
     } // end of AnimatorUpdateListener

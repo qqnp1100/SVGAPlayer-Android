@@ -3,10 +3,11 @@ apply plugin: 'kotlin-android'
 
 
 android {
-    compileSdk 31
+    namespace "com.opensource.svgaplayer"
+    compileSdk 33
     defaultConfig {
         minSdkVersion 21
-        targetSdkVersion 31
+        targetSdkVersion 33
     }
     compileOptions {
 //        kotlinOptions.freeCompilerArgs += ['-module-name', "com.opensource.svgaplayer"]
@@ -18,8 +19,8 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
     packagingOptions {
         exclude 'META-INF/ASL2.0'
@@ -33,6 +34,6 @@ android {
 
 
 dependencies {
-    implementation 'com.squareup.wire:wire-runtime:4.4.1'
-    implementation 'androidx.appcompat:appcompat:1.0.0'
+    implementation 'com.squareup.wire:wire-runtime:4.8.0'
+    implementation 'androidx.appcompat:appcompat:1.2.0'
 }
