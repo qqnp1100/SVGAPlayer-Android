@@ -167,9 +167,8 @@ class SVGAVideoEntity {
             if (fileTag[0].toInt() == 73 && fileTag[1].toInt() == 68 && fileTag[2].toInt() == 51) {
                 return@forEach
             }
-            val filePath = generateBitmapFilePath(entry.value.utf8(), entry.key)
             val maxScale = scaleMap[entry.key] ?: Pair(1f, 1f)
-            createBitmap(byteArray, filePath, maxScale.first, maxScale.second)?.let { bitmap ->
+            createBitmap(byteArray, entry.key, maxScale.first, maxScale.second)?.let { bitmap ->
                 imageMap[entry.key] = bitmap
             }
         }
@@ -177,7 +176,7 @@ class SVGAVideoEntity {
 
     private fun createBitmap(
         byteArray: ByteArray,
-        filePath: String,
+        imgKey: String,
         scaleX: Float,
         scaleY: Float
     ): Bitmap? {
@@ -191,7 +190,11 @@ class SVGAVideoEntity {
                 videoSize.width.toInt(),
                 videoSize.height.toInt()
             )
-        return bitmap ?: createBitmap(filePath, scaleX, scaleY)
+        if (bitmap != null) {
+            return bitmap
+        }
+        val filePath = generateBitmapFilePath(String(byteArray, Charsets.UTF_8), imgKey)
+        return createBitmap(filePath, scaleX, scaleY)
     }
 
     private fun resetSprites(json: JSONObject) {

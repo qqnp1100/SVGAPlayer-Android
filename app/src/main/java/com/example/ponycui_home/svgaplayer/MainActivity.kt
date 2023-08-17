@@ -12,6 +12,7 @@ import android.widget.ListAdapter
 import android.widget.ListView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import com.opensource.svgaplayer.SVGACache
 import com.opensource.svgaplayer.SVGAParser.Companion.shareParser
 import com.opensource.svgaplayer.utils.log.SVGALogger.setLogEnabled
 
@@ -127,6 +128,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun setupSVGAParser() {
+        SVGACache.onCreate(this, SVGACache.Type.FILE)
         shareParser().init(this)
     }
 
