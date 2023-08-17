@@ -143,6 +143,7 @@ class SVGAParser(context: Context?) {
             videoWidth: Int,
             videoHeight: Int
         ): Bitmap?
+
         /**
          * @param scaleX      图片显示中最大的缩放
          * @param scaleY      图片显示中最大的缩放
@@ -467,12 +468,16 @@ class SVGAParser(context: Context?) {
                         // 如果 SVGACache 设置类型为 FILE
                         threadPoolExecutor.execute {
                             SVGACache.buildSvgaFile(cacheKey).let { cacheFile ->
+                                var outputStream: FileOutputStream? = null
                                 try {
                                     cacheFile.takeIf { !it.exists() }?.createNewFile()
-                                    FileOutputStream(cacheFile).write(bytes)
+                                    outputStream = FileOutputStream(cacheFile)
+                                    outputStream.write(bytes)
                                 } catch (e: Exception) {
                                     LogUtils.error(TAG, "create cache file fail.", e)
                                     cacheFile.delete()
+                                } finally {
+                                    outputStream?.close()
                                 }
                             }
                         }
@@ -556,12 +561,16 @@ class SVGAParser(context: Context?) {
                             // 如果 SVGACache 设置类型为 FILE
                             threadPoolExecutor.execute {
                                 SVGACache.buildSvgaFile(cacheKey).let { cacheFile ->
+                                    var outputStream: FileOutputStream? = null
                                     try {
                                         cacheFile.takeIf { !it.exists() }?.createNewFile()
-                                        FileOutputStream(cacheFile).write(bytes)
+                                        outputStream = FileOutputStream(cacheFile)
+                                        outputStream.write(bytes)
                                     } catch (e: Exception) {
                                         LogUtils.error(TAG, "create cache file fail.", e)
                                         cacheFile.delete()
+                                    } finally {
+                                        outputStream?.close()
                                     }
                                 }
                             }
