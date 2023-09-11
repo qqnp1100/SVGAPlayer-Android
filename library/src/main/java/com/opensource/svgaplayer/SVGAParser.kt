@@ -170,6 +170,8 @@ class SVGAParser(context: Context?) {
 
         private val threadNum = AtomicInteger(0)
         private var mShareParser = SVGAParser(null)
+        private val handler: Handler by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { Handler(Looper.getMainLooper()!!) }
+        fun handler(): Handler = handler
         private var customBitmapDecoder: BitmapDecoder = object : BitmapDecoder {
             override fun onLoad(
                 path: String,
