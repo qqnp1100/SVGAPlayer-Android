@@ -21,6 +21,7 @@ class SVGADynamicEntity {
     internal var dynamicOutImage: HashMap<String, Bitmap> = hashMapOf()
 
     internal var dynamicText: HashMap<String, String> = hashMapOf()
+    internal var dynamicScrollTextSpeed: HashMap<String, Float> = hashMapOf()
 
     internal var dynamicTextPaint: HashMap<String, TextPaint> = hashMapOf()
 
@@ -76,6 +77,9 @@ class SVGADynamicEntity {
                 }
             }
         }
+    }
+    fun setDynamicTextScrollSpeed(forKey: String,speed:Float){
+        this.dynamicScrollTextSpeed.put(forKey, speed)
     }
 
     fun setDynamicText(text: String, textPaint: TextPaint, forKey: String) {
@@ -156,6 +160,7 @@ class SVGADynamicEntity {
         this.dynamicInImage.clear()
         this.dynamicOutImage.clear()
         this.dynamicText.clear()
+        this.dynamicScrollTextSpeed.clear()
         this.dynamicTextPaint.clear()
         this.dynamicStaticLayoutText.clear()
         this.dynamicBoringLayoutText.clear()

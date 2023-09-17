@@ -1,4 +1,5 @@
 # 本分支修改内容（基于2.6.1版本修改）
+- SVGADynamicEntity 增加 setDynamicTextScrollSpeed方法 设置速度后文字可以滚动
 - SVGAVideoEntity 增加 imageMapSize方法
 - SVGAParser decode方法增加宽高参数，可以每次加载svga都设定不同宽高了
     ```

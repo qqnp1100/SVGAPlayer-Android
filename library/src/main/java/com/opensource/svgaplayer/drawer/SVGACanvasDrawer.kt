@@ -14,10 +14,12 @@ import com.opensource.svgaplayer.entities.SVGAVideoShapeEntity
  * Created by cuiminghui on 2017/3/29.
  */
 
-internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicEntity) : SGVADrawer(videoItem) {
+internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicEntity) :
+    SGVADrawer(videoItem) {
 
     private val sharedValues = ShareValues()
     private val drawTextCache: HashMap<String, Bitmap> = hashMapOf()
+    private val scrollTextPosition: HashMap<String, Float> = hashMapOf()
     private val pathCache = PathCache()
 
     private var beginIndexList: Array<Boolean>? = null
@@ -64,7 +66,13 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             /// Is matte begin
             if (isMatteBegin(index, sprites)) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    saveID = canvas.saveLayer(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), null)
+                    saveID = canvas.saveLayer(
+                        0f,
+                        0f,
+                        canvas.width.toFloat(),
+                        canvas.height.toFloat(),
+                        null
+                    )
                 } else {
                     canvas.save()
                 }
@@ -75,8 +83,17 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             /// Is matte end
             if (isMatteEnd(index, sprites)) {
                 matteSprites.get(svgaDrawerSprite.matteKey)?.let {
-                    drawSprite(it, this.sharedValues.shareMatteCanvas(canvas.width, canvas.height), frameIndex)
-                    canvas.drawBitmap(this.sharedValues.sharedMatteBitmap(), 0f, 0f, this.sharedValues.shareMattePaint())
+                    drawSprite(
+                        it,
+                        this.sharedValues.shareMatteCanvas(canvas.width, canvas.height),
+                        frameIndex
+                    )
+                    canvas.drawBitmap(
+                        this.sharedValues.sharedMatteBitmap(),
+                        0f,
+                        0f,
+                        this.sharedValues.shareMattePaint()
+                    )
                     if (saveID != -1) {
                         canvas.restoreToCount(saveID)
                     } else {
@@ -160,7 +177,8 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             if (audio.startFrame == frameIndex) {
                 if (SVGASoundManager.isInit()) {
                     audio.soundID?.let { soundID ->
-                        audio.playIDs?.add(SVGASoundManager.play(soundID).apply { mySoundId = this })
+                        audio.playIDs?.add(
+                            SVGASoundManager.play(soundID).apply { mySoundId = this })
                     }
                 } else {
                     this.videoItem.soundPool?.let { soundPool ->
@@ -207,8 +225,12 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         if (isHidden) {
             return
         }
-        val bitmapKey = if (imageKey.endsWith(".matte")) imageKey.substring(0, imageKey.length - 6) else imageKey
-        val drawingBitmap = (dynamicItem.getDynamicImage(bitmapKey) ?: videoItem.imageMap[bitmapKey])
+        val bitmapKey = if (imageKey.endsWith(".matte")) imageKey.substring(
+            0,
+            imageKey.length - 6
+        ) else imageKey
+        val drawingBitmap =
+            (dynamicItem.getDynamicImage(bitmapKey) ?: videoItem.imageMap[bitmapKey])
                 ?: return
         val frameMatrix = shareFrameMatrix(sprite.frameEntity.transform)
         val paint = this.sharedValues.sharedPaint()
@@ -222,13 +244,19 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             maskPath.buildPath(path)
             path.transform(frameMatrix)
             canvas.clipPath(path)
-            frameMatrix.preScale((sprite.frameEntity.layout.width / drawingBitmap.width).toFloat(), (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat())
+            frameMatrix.preScale(
+                (sprite.frameEntity.layout.width / drawingBitmap.width).toFloat(),
+                (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat()
+            )
             if (!drawingBitmap.isRecycled) {
                 canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
             }
             canvas.restore()
         } else {
-            frameMatrix.preScale((sprite.frameEntity.layout.width / drawingBitmap.width).toFloat(), (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat())
+            frameMatrix.preScale(
+                (sprite.frameEntity.layout.width / drawingBitmap.width).toFloat(),
+                (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat()
+            )
             if (!drawingBitmap.isRecycled) {
                 canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
             }
@@ -237,33 +265,51 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             it.get(imageKey)?.let { listener ->
                 val matrixArray = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
                 frameMatrix.getValues(matrixArray)
-                listener.onResponseArea(imageKey, matrixArray[2].toInt()
-                        , matrixArray[5].toInt()
-                        , (drawingBitmap.width * matrixArray[0] + matrixArray[2]).toInt()
-                        , (drawingBitmap.height * matrixArray[4] + matrixArray[5]).toInt())
+                listener.onResponseArea(
+                    imageKey,
+                    matrixArray[2].toInt(),
+                    matrixArray[5].toInt(),
+                    (drawingBitmap.width * matrixArray[0] + matrixArray[2]).toInt(),
+                    (drawingBitmap.height * matrixArray[4] + matrixArray[5]).toInt()
+                )
             }
         }
         drawTextOnBitmap(canvas, drawingBitmap, sprite, frameMatrix)
     }
 
-    private fun drawTextOnBitmap(canvas: Canvas, drawingBitmap: Bitmap, sprite: SVGADrawerSprite, frameMatrix: Matrix) {
+    private fun drawTextOnBitmap(
+        canvas: Canvas,
+        drawingBitmap: Bitmap,
+        sprite: SVGADrawerSprite,
+        frameMatrix: Matrix
+    ) {
         if (dynamicItem.isTextDirty) {
             this.drawTextCache.clear()
             dynamicItem.isTextDirty = false
         }
         val imageKey = sprite.imageKey ?: return
         var textBitmap: Bitmap? = null
+        val scrollSpeed = dynamicItem.dynamicScrollTextSpeed[imageKey] ?: -1f
         dynamicItem.dynamicText[imageKey]?.let { drawingText ->
             dynamicItem.dynamicTextPaint[imageKey]?.let { drawingTextPaint ->
                 drawTextCache[imageKey]?.let {
                     textBitmap = it
                 } ?: kotlin.run {
+                    var bitmapWidth = drawingBitmap.width
+                    var textDrawStart = drawingBitmap.width / 2f
+                    if (scrollSpeed > 0) {
+                        val textWidth = drawingTextPaint.measureText(drawingText)
+                        if (textWidth > drawingBitmap.width) {
+                            bitmapWidth = textWidth.toInt()
+                            textDrawStart = 0f
+                        }
+                    }
                     textBitmap = Bitmap.createBitmap(
-                        drawingBitmap.width,
+                        bitmapWidth,
                         drawingBitmap.height,
                         Bitmap.Config.ARGB_8888
                     ).apply {
-                        val drawRect = Rect(0, 0, drawingBitmap.width, drawingBitmap.height)
+                        val drawRect = Rect(0, 0, bitmapWidth, drawingBitmap.height)
                         val textCanvas = Canvas(this)
                         drawingTextPaint.isAntiAlias = true
                         val fontMetrics = drawingTextPaint.getFontMetrics();
@@ -272,7 +318,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                         val baseLineY = drawRect.centerY() - top / 2 - bottom / 2
                         textCanvas.drawText(
                             drawingText,
-                            drawRect.centerX().toFloat(),
+                            textDrawStart,
                             baseLineY,
                             drawingTextPaint
                         );
@@ -287,8 +333,18 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 textBitmap = it
             } ?: kotlin.run {
                 it.paint.isAntiAlias = true
-
-                textBitmap = Bitmap.createBitmap(drawingBitmap.width, drawingBitmap.height, Bitmap.Config.ARGB_8888).apply {
+                var bitmapWidth = drawingBitmap.width
+                if (scrollSpeed > 0) {
+                    val textWidth = it.paint.measureText(it.text, 0, it.text.length)
+                    if (textWidth > drawingBitmap.width) {
+                        bitmapWidth = textWidth.toInt()
+                    }
+                }
+                textBitmap = Bitmap.createBitmap(
+                    bitmapWidth,
+                    drawingBitmap.height,
+                    Bitmap.Config.ARGB_8888
+                ).apply {
                     val textCanvas = Canvas(this)
                     textCanvas.translate(0f, ((drawingBitmap.height - it.height) / 2).toFloat())
                     it.draw(textCanvas)
@@ -302,24 +358,46 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 textBitmap = it
             } ?: kotlin.run {
                 it.paint.isAntiAlias = true
+                var bitmapWidth = drawingBitmap.width
+                if (scrollSpeed > 0) {
+                    val textWidth = it.paint.measureText(it.text, 0, it.text.length)
+                    if (textWidth > drawingBitmap.width) {
+                        bitmapWidth = textWidth.toInt()
+                    }
+                }
                 var layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     var lineMax = try {
-                        val field = StaticLayout::class.java.getDeclaredField("mMaximumVisibleLineCount")
+                        val field =
+                            StaticLayout::class.java.getDeclaredField("mMaximumVisibleLineCount")
                         field.isAccessible = true
                         field.getInt(it)
                     } catch (e: Exception) {
                         Int.MAX_VALUE
                     }
                     StaticLayout.Builder
-                            .obtain(it.text, 0, it.text.length, it.paint, drawingBitmap.width)
-                            .setAlignment(it.alignment)
-                            .setMaxLines(lineMax)
-                            .setEllipsize(TextUtils.TruncateAt.END)
-                            .build()
+                        .obtain(it.text, 0, it.text.length, it.paint, bitmapWidth)
+                        .setAlignment(it.alignment)
+                        .setMaxLines(lineMax)
+                        .setEllipsize(TextUtils.TruncateAt.END)
+                        .build()
                 } else {
-                    StaticLayout(it.text, 0, it.text.length, it.paint, drawingBitmap.width, it.alignment, it.spacingMultiplier, it.spacingAdd, false)
+                    StaticLayout(
+                        it.text,
+                        0,
+                        it.text.length,
+                        it.paint,
+                        bitmapWidth,
+                        it.alignment,
+                        it.spacingMultiplier,
+                        it.spacingAdd,
+                        false
+                    )
                 }
-                textBitmap = Bitmap.createBitmap(drawingBitmap.width, drawingBitmap.height, Bitmap.Config.ARGB_8888)?.apply {
+                textBitmap = Bitmap.createBitmap(
+                    bitmapWidth,
+                    drawingBitmap.height,
+                    Bitmap.Config.ARGB_8888
+                )?.apply {
                     val textCanvas = Canvas(this)
                     textCanvas.translate(0f, ((drawingBitmap.height - layout.height) / 2).toFloat())
                     layout.draw(textCanvas)
@@ -336,7 +414,8 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 canvas.save()
                 canvas.concat(frameMatrix)
                 canvas.clipRect(0, 0, drawingBitmap.width, drawingBitmap.height)
-                val bitmapShader = BitmapShader(textBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+                val bitmapShader =
+                    BitmapShader(textBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
                 paint.shader = bitmapShader
                 val path = this.sharedValues.sharedPath()
                 maskPath.buildPath(path)
@@ -344,7 +423,62 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 canvas.restore()
             } else {
                 paint.isFilterBitmap = videoItem.antiAlias
-                canvas.drawBitmap(textBitmap, frameMatrix, paint)
+                if (textBitmap.width > drawingBitmap.width) {
+                    var textScrollX = 0f
+                    val drawingBitmapWidth = drawingBitmap.width
+                    val speed = dynamicItem.dynamicScrollTextSpeed[imageKey] ?: 0f
+                    textScrollX = (scrollTextPosition[imageKey] ?: 0f) + speed
+                    if (textScrollX > textBitmap.width * 2 + drawingBitmapWidth * 2) {
+                        textScrollX = drawingBitmapWidth.toFloat()
+                    }
+                    scrollTextPosition[imageKey] = textScrollX
+                    val textScrollXOne =
+                        (textScrollX) % (textBitmap.width * 2 + drawingBitmapWidth)
+                    val textScrollXTwo =
+                        (textScrollX) % (textBitmap.width * 2 + drawingBitmapWidth + drawingBitmapWidth / 2)
+                    val fm = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
+                    frameMatrix.getValues(fm)
+                    val startX = fm[2]
+                    val startY = fm[5]
+                    val scaleX = fm[0]
+                    val scaleY = fm[4]
+                    val dstWidth = drawingBitmapWidth * scaleX
+                    val dstHeight = drawingBitmap.height * scaleY
+                    canvas.drawBitmap(
+                        textBitmap,
+                        Rect(
+                            -drawingBitmapWidth + (0 + textScrollXOne).toInt(),
+                            0,
+                            -drawingBitmapWidth + (drawingBitmapWidth + textScrollXOne).toInt(),
+                            textBitmap.height
+                        ),
+                        RectF(
+                            startX,
+                            startY,
+                            startX + dstWidth,
+                            startY + dstHeight
+                        ),
+                        paint
+                    )
+                    canvas.drawBitmap(
+                        textBitmap,
+                        Rect(
+                            (textScrollXTwo - textBitmap.width - drawingBitmapWidth - drawingBitmapWidth / 2).toInt(),
+                            0,
+                            (drawingBitmapWidth + textScrollXTwo - textBitmap.width - drawingBitmapWidth - drawingBitmapWidth / 2).toInt(),
+                            textBitmap.height
+                        ),
+                        Rect(
+                            startX.toInt(),
+                            startY.toInt(),
+                            (startX + dstWidth).toInt(),
+                            (startY + dstHeight).toInt()
+                        ),
+                        paint
+                    )
+                } else {
+                    canvas.drawBitmap(textBitmap, frameMatrix, paint)
+                }
             }
         }
     }
@@ -372,7 +506,8 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                     if (it != 0x00000000) {
                         paint.style = Paint.Style.FILL
                         paint.color = it
-                        val alpha = Math.min(255, Math.max(0, (sprite.frameEntity.alpha * 255).toInt()))
+                        val alpha =
+                            Math.min(255, Math.max(0, (sprite.frameEntity.alpha * 255).toInt()))
                         if (alpha != 255) {
                             paint.alpha = alpha
                         }
@@ -393,7 +528,8 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                         paint.style = Paint.Style.STROKE
                         shape.styles?.stroke?.let {
                             paint.color = it
-                            val alpha = Math.min(255, Math.max(0, (sprite.frameEntity.alpha * 255).toInt()))
+                            val alpha =
+                                Math.min(255, Math.max(0, (sprite.frameEntity.alpha * 255).toInt()))
                             if (alpha != 255) {
                                 paint.alpha = alpha
                             }
@@ -421,10 +557,12 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                         }
                         shape.styles?.lineDash?.let {
                             if (it.size == 3 && (it[0] > 0 || it[1] > 0)) {
-                                paint.pathEffect = DashPathEffect(floatArrayOf(
+                                paint.pathEffect = DashPathEffect(
+                                    floatArrayOf(
                                         (if (it[0] < 1.0f) 1.0f else it[0]) * scale,
                                         (if (it[1] < 0.1f) 0.1f else it[1]) * scale
-                                ), it[2] * scale)
+                                    ), it[2] * scale
+                                )
                             }
                         }
                         if (sprite.frameEntity.maskPath !== null) canvas.save()
@@ -484,7 +622,12 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             val frameMatrix = shareFrameMatrix(sprite.frameEntity.transform)
             canvas.save()
             canvas.concat(frameMatrix)
-            it.invoke(canvas, frameIndex, sprite.frameEntity.layout.width.toInt(), sprite.frameEntity.layout.height.toInt())
+            it.invoke(
+                canvas,
+                frameIndex,
+                sprite.frameEntity.layout.width.toInt(),
+                sprite.frameEntity.layout.height.toInt()
+            )
             canvas.restore()
         }
     }
@@ -543,7 +686,13 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
 //            val matteCanvas = shareMatteCanvas as Canvas
 //            matteCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
 //            return matteCanvas
-            return Canvas(sharedMatteBitmap?:Bitmap.createBitmap(width, height, Bitmap.Config.ALPHA_8))
+            return Canvas(
+                sharedMatteBitmap ?: Bitmap.createBitmap(
+                    width,
+                    height,
+                    Bitmap.Config.ALPHA_8
+                )
+            )
         }
     }
 
