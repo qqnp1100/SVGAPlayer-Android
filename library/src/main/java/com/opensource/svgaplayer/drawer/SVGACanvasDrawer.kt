@@ -302,6 +302,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                         if (textWidth > drawingBitmap.width) {
                             bitmapWidth = textWidth.toInt()
                             textDrawStart = 0f
+                            drawingTextPaint.textAlign = Paint.Align.LEFT
                         }
                     }
                     textBitmap = Bitmap.createBitmap(
@@ -338,6 +339,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                     val textWidth = it.paint.measureText(it.text, 0, it.text.length)
                     if (textWidth > drawingBitmap.width) {
                         bitmapWidth = textWidth.toInt()
+                        it.paint.textAlign = Paint.Align.LEFT
                     }
                 }
                 textBitmap = Bitmap.createBitmap(
@@ -363,6 +365,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                     val textWidth = it.paint.measureText(it.text, 0, it.text.length)
                     if (textWidth > drawingBitmap.width) {
                         bitmapWidth = textWidth.toInt()
+                        it.paint.textAlign = Paint.Align.LEFT
                     }
                 }
                 var layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
