@@ -42,6 +42,8 @@ class SVGADynamicEntity {
 
     internal var isTextDirty = false
 
+    var srcollTextSpace = 10f
+
     fun setHidden(value: Boolean, forKey: String) {
         this.dynamicHidden.put(forKey, value)
     }
@@ -78,7 +80,11 @@ class SVGADynamicEntity {
             }
         }
     }
-    fun setDynamicTextScrollSpeed(forKey: String,speed:Float){
+
+    /**
+     * @speed 我也不知道是什么单位，反正速度能统一，大家伙看着设吧
+     */
+    fun setDynamicTextScrollSpeed(forKey: String, speed: Float) {
         this.dynamicScrollTextSpeed.put(forKey, speed)
     }
 
