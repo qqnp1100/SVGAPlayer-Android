@@ -19,9 +19,9 @@ import java.net.URL
  * Created by PonyCui on 2017/3/29.
  */
 open class SVGAImageView @JvmOverloads constructor(
-        context: Context,
-        attrs: AttributeSet? = null,
-        defStyleAttr: Int = 0
+    context: Context,
+    attrs: AttributeSet? = null,
+    defStyleAttr: Int = 0
 ) : AppCompatImageView(context, attrs, defStyleAttr) {
 
     private val TAG = "SVGAImageView"
@@ -38,9 +38,9 @@ open class SVGAImageView @JvmOverloads constructor(
     var loops = 0
 
     @Deprecated(
-            "It is recommended to use clearAfterDetached, or manually call to SVGAVideoEntity#clear." +
-                    "If you just consider cleaning up the canvas after playing, you can use FillMode#Clear.",
-            level = DeprecationLevel.WARNING
+        "It is recommended to use clearAfterDetached, or manually call to SVGAVideoEntity#clear." +
+                "If you just consider cleaning up the canvas after playing, you can use FillMode#Clear.",
+        level = DeprecationLevel.WARNING
     )
     var clearsAfterStop = false
     var clearsAfterDetached = false
@@ -55,6 +55,11 @@ open class SVGAImageView @JvmOverloads constructor(
     private val mAnimatorUpdateListener = AnimatorUpdateListener(this)
     private var mStartFrame = 0
     private var mEndFrame = 0
+    private var updateSvagDrawableCallBackWait = false
+    private var updateSvagDrawableCallBack = Runnable {
+        updateSvagDrawableCallBackWait = false
+        getSVGADrawable()?.invalidateSelf()
+    }
 
     init {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR2) {
@@ -64,10 +69,12 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     private fun loadAttrs(attrs: AttributeSet) {
-        val typedArray = context.theme.obtainStyledAttributes(attrs, R.styleable.SVGAImageView, 0, 0)
+        val typedArray =
+            context.theme.obtainStyledAttributes(attrs, R.styleable.SVGAImageView, 0, 0)
         loops = typedArray.getInt(R.styleable.SVGAImageView_loopCount, 0)
         clearsAfterStop = typedArray.getBoolean(R.styleable.SVGAImageView_clearsAfterStop, false)
-        clearsAfterDetached = typedArray.getBoolean(R.styleable.SVGAImageView_clearsAfterDetached, false)
+        clearsAfterDetached =
+            typedArray.getBoolean(R.styleable.SVGAImageView_clearsAfterDetached, false)
         mAntiAlias = typedArray.getBoolean(R.styleable.SVGAImageView_antiAlias, true)
         mAutoPlay = typedArray.getBoolean(R.styleable.SVGAImageView_autoPlay, true)
         typedArray.getString(R.styleable.SVGAImageView_fillMode)?.let {
@@ -75,9 +82,11 @@ open class SVGAImageView @JvmOverloads constructor(
                 "0" -> {
                     fillMode = FillMode.Backward
                 }
+
                 "1" -> {
                     fillMode = FillMode.Forward
                 }
+
                 "2" -> {
                     fillMode = FillMode.Clear
                 }
@@ -135,10 +144,14 @@ open class SVGAImageView @JvmOverloads constructor(
         setupDrawable()
         mStartFrame = Math.max(0, range?.location ?: 0)
         val videoItem = drawable.videoItem
-        mEndFrame = Math.min(videoItem.frames - 1, ((range?.location ?: 0) + (range?.length ?: Int.MAX_VALUE) - 1))
+        mEndFrame = Math.min(
+            videoItem.frames - 1,
+            ((range?.location ?: 0) + (range?.length ?: Int.MAX_VALUE) - 1)
+        )
         val animator = ValueAnimator.ofInt(mStartFrame, mEndFrame)
         animator.interpolator = LinearInterpolator()
-        animator.duration = ((mEndFrame - mStartFrame + 1) * (1000 / videoItem.FPS) / generateScale()).toLong()
+        animator.duration =
+            ((mEndFrame - mStartFrame + 1) * (1000 / videoItem.FPS) / generateScale()).toLong()
         animator.repeatCount = if (loops <= 0) 99999 else loops - 1
         animator.addUpdateListener(mAnimatorUpdateListener)
         animator.addListener(mAnimatorListener)
@@ -168,13 +181,17 @@ open class SVGAImageView @JvmOverloads constructor(
             val getMethod = animatorClass.getDeclaredMethod("getDurationScale") ?: return scale
             scale = (getMethod.invoke(animatorClass) as Float).toDouble()
             if (scale == 0.0) {
-                val setMethod = animatorClass.getDeclaredMethod("setDurationScale",Float::class.java) ?: return scale
+                val setMethod =
+                    animatorClass.getDeclaredMethod("setDurationScale", Float::class.java)
+                        ?: return scale
                 setMethod.isAccessible = true
-                setMethod.invoke(animatorClass,1.0f)
+                setMethod.invoke(animatorClass, 1.0f)
                 scale = 1.0
-                LogUtils.info(TAG,
-                        "The animation duration scale has been reset to" +
-                                " 1.0x, because you closed it on developer options.")
+                LogUtils.info(
+                    TAG,
+                    "The animation duration scale has been reset to" +
+                            " 1.0x, because you closed it on developer options."
+                )
             }
         } catch (ignore: Exception) {
             ignore.printStackTrace()
@@ -185,7 +202,8 @@ open class SVGAImageView @JvmOverloads constructor(
     private fun onAnimatorUpdate(animator: ValueAnimator?) {
         val drawable = getSVGADrawable() ?: return
         drawable.currentFrame = animator?.animatedValue as Int
-        val percentage = (drawable.currentFrame + 1).toDouble() / drawable.videoItem.frames.toDouble()
+        val percentage =
+            (drawable.currentFrame + 1).toDouble() / drawable.videoItem.frames.toDouble()
         callback?.onStep(drawable.currentFrame, percentage)
     }
 
@@ -198,9 +216,11 @@ open class SVGAImageView @JvmOverloads constructor(
                 FillMode.Backward -> {
                     drawable.currentFrame = mStartFrame
                 }
+
                 FillMode.Forward -> {
                     drawable.currentFrame = mEndFrame
                 }
+
                 FillMode.Clear -> {
                     drawable.cleared = true
                 }
@@ -211,6 +231,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     fun clear() {
         getSVGADrawable()?.cleared = true
+        getSVGADrawable()?.dynamicItem?.updateCallBack = null
         getSVGADrawable()?.clear()
         // 清除对 drawable 的引用
         setImageDrawable(null)
@@ -244,6 +265,43 @@ open class SVGAImageView @JvmOverloads constructor(
             val drawable = SVGADrawable(videoItem, dynamicItem ?: SVGADynamicEntity())
             drawable.cleared = true
             setImageDrawable(drawable)
+            dynamicItem?.updateCallBack = {
+                updateSvagDrawable()
+            }
+        }
+    }
+
+    //静止的
+    fun setStaticVideoItem(videoItem: SVGAVideoEntity?) {
+        setStaticVideoItem(videoItem, SVGADynamicEntity())
+    }
+
+    fun setStaticVideoItem(
+        videoItem: SVGAVideoEntity?,
+        dynamicItem: SVGADynamicEntity?
+    ): SVGADrawable? {
+        if (videoItem == null) {
+            setImageDrawable(null)
+        } else {
+
+            val drawable = SVGADrawable(videoItem, dynamicItem ?: SVGADynamicEntity())
+            drawable.cleared = false
+            setImageDrawable(drawable)
+            dynamicItem?.updateCallBack = {
+                updateSvagDrawable()
+            }
+            return drawable
+        }
+        return null
+    }
+
+    private fun updateSvagDrawable() {
+        if (isAnimating) {
+            return
+        }
+        if (!updateSvagDrawableCallBackWait) {
+            updateSvagDrawableCallBackWait = true
+            postDelayed(updateSvagDrawableCallBack, 16)
         }
     }
 
@@ -254,7 +312,10 @@ open class SVGAImageView @JvmOverloads constructor(
         if (andPlay) {
             startAnimation()
             mAnimator?.let {
-                it.currentPlayTime = (Math.max(0.0f, Math.min(1.0f, (frame.toFloat() / drawable.videoItem.frames.toFloat()))) * it.duration).toLong()
+                it.currentPlayTime = (Math.max(
+                    0.0f,
+                    Math.min(1.0f, (frame.toFloat() / drawable.videoItem.frames.toFloat()))
+                ) * it.duration).toLong()
             }
         }
     }
@@ -268,7 +329,7 @@ open class SVGAImageView @JvmOverloads constructor(
         stepToFrame(frame, andPlay)
     }
 
-    fun setOnAnimKeyClickListener(clickListener : SVGAClickAreaListener){
+    fun setOnAnimKeyClickListener(clickListener: SVGAClickAreaListener) {
         mItemClickAreaListener = clickListener
     }
 
@@ -292,6 +353,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        removeCallbacks(updateSvagDrawableCallBack)
         stopAnimation(clearsAfterDetached)
         if (clearsAfterDetached) {
             clear()
@@ -319,7 +381,8 @@ open class SVGAImageView @JvmOverloads constructor(
     } // end of AnimatorListener
 
 
-    private class AnimatorUpdateListener(view: SVGAImageView) : ValueAnimator.AnimatorUpdateListener {
+    private class AnimatorUpdateListener(view: SVGAImageView) :
+        ValueAnimator.AnimatorUpdateListener {
         private val weakReference = WeakReference<SVGAImageView>(view)
 
         override fun onAnimationUpdate(animation: ValueAnimator) {

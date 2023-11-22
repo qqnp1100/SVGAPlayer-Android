@@ -125,7 +125,7 @@ class SVGAParser(context: Context?) {
 
     var fileDownloader = FileDownloader()
 
-    open interface BitmapDecoder {
+    interface BitmapDecoder {
         /**
          * @param scaleX      图片显示中最大的缩放
          * @param scaleY      图片显示中最大的缩放
@@ -165,6 +165,10 @@ class SVGAParser(context: Context?) {
         fun onClean(bitmap: Bitmap)
     }
 
+    interface CustomDynamicImageLoad {
+        fun loadImage(url: String, forKey: String, callback: ((bitmap: Bitmap) -> Unit)? = null)
+    }
+
     companion object {
         private const val TAG = "SVGAParser"
 
@@ -172,6 +176,7 @@ class SVGAParser(context: Context?) {
         private var mShareParser = SVGAParser(null)
         private val handler: Handler by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { Handler(Looper.getMainLooper()!!) }
         fun handler(): Handler = handler
+        var customDynamicImageLoad: CustomDynamicImageLoad? = null
         private var customBitmapDecoder: BitmapDecoder = object : BitmapDecoder {
             override fun onLoad(
                 path: String,

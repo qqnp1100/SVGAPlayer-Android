@@ -42,6 +42,8 @@ class SVGADynamicEntity {
 
     internal var isTextDirty = false
 
+    var updateCallBack: (() -> Unit)? = null
+
     var srcollTextSpace = 10f
 
     fun setHidden(value: Boolean, forKey: String) {
@@ -57,6 +59,15 @@ class SVGADynamicEntity {
     }
 
     fun setDynamicImage(url: String, forKey: String) {
+        if (SVGAParser.customDynamicImageLoad != null) {
+            SVGAParser.customDynamicImageLoad?.loadImage(url, forKey) {
+                SVGAParser.handler().post {
+                    dynamicOutImage[forKey] = it
+                    updateCallBack?.invoke()
+                }
+            }
+            return
+        }
         SVGAParser.threadPoolExecutor.execute {
             (URL(url).openConnection() as? HttpURLConnection)?.let {
                 try {
@@ -65,7 +76,10 @@ class SVGADynamicEntity {
                     it.connect()
                     it.inputStream.use { stream ->
                         BitmapFactory.decodeStream(stream)?.let {
-                            SVGAParser.handler().post { dynamicInImage[forKey] = it }
+                            SVGAParser.handler().post {
+                                dynamicInImage[forKey] = it
+                                updateCallBack?.invoke()
+                            }
                         }
                     }
                 } catch (e: Exception) {
