@@ -665,7 +665,7 @@ class SVGAParser(context: Context?) {
         callback: ParseCompletion?,
         alias: String?
     ) {
-        Handler(Looper.getMainLooper()).post {
+        handler().post {
             LogUtils.info(TAG, "================ $alias parser complete ================")
             callback?.onComplete(videoItem)
         }
@@ -679,7 +679,7 @@ class SVGAParser(context: Context?) {
         e.printStackTrace()
         LogUtils.error(TAG, "================ $alias parser error ================")
         LogUtils.error(TAG, "$alias parse error", e)
-        Handler(Looper.getMainLooper()).post {
+        handler().post {
             callback?.onError()
         }
     }
