@@ -622,6 +622,105 @@ class SVGAParser(context: Context?) {
         }
     }
 
+    fun decodeFromFile(
+        path: String,
+        cacheKey: String,
+        callback: ParseCompletion?,
+        playCallback: PlayCallback? = null,
+        frameWidth: Int = 0,
+        frameHeight: Int = 0
+    ) {
+        if (mContext == null) {
+            LogUtils.error(TAG, "在配置 SVGAParser context 前, 无法解析 SVGA 文件。")
+            return
+        }
+        val bitmapWidth = if (frameWidth > 0) frameWidth else mFrameWidth
+        val bitmapHeight = if (frameHeight > 0) frameHeight else mFrameHeight
+        LogUtils.info(TAG, "================ decode file from input stream ================")
+        threadPoolExecutor.execute {
+            val alias = "file"
+            val inputStream = File(path).inputStream()
+            try {
+                readAsBytes(inputStream)?.let { bytes ->
+                    if (isZipFile(bytes)) {
+                        LogUtils.info(TAG, "decode from zip file")
+                        if (!SVGACache.buildCacheDir(cacheKey).exists() || isUnzipping) {
+                            synchronized(fileLock) {
+                                if (!SVGACache.buildCacheDir(cacheKey).exists()) {
+                                    isUnzipping = true
+                                    LogUtils.info(TAG, "no cached, prepare to unzip")
+                                    ByteArrayInputStream(bytes).use {
+                                        unzip(it, cacheKey)
+                                        isUnzipping = false
+                                        LogUtils.info(TAG, "unzip success")
+                                    }
+                                }
+                            }
+                        }
+                        this.decodeFromCacheKey(
+                            cacheKey,
+                            callback,
+                            alias,
+                            bitmapWidth,
+                            bitmapHeight
+                        )
+                    } else {
+                        if (!SVGACache.isDefaultCache()) {
+                            // 如果 SVGACache 设置类型为 FILE
+                            threadPoolExecutor.execute {
+                                SVGACache.buildSvgaFile(cacheKey).let { cacheFile ->
+                                    var outputStream: FileOutputStream? = null
+                                    try {
+                                        cacheFile.takeIf { !it.exists() }?.createNewFile()
+                                        outputStream = FileOutputStream(cacheFile)
+                                        outputStream.write(bytes)
+                                    } catch (e: Exception) {
+                                        LogUtils.error(TAG, "create cache file fail.", e)
+                                        cacheFile.delete()
+                                    } finally {
+                                        outputStream?.close()
+                                    }
+                                }
+                            }
+                        }
+                        LogUtils.info(TAG, "inflate start")
+                        inflate(bytes)?.let {
+                            LogUtils.info(TAG, "inflate complete")
+                            val videoItem = SVGAVideoEntity(
+                                MovieEntity.ADAPTER.decode(it),
+                                File(cacheKey),
+                                bitmapWidth,
+                                bitmapHeight
+                            )
+                            LogUtils.info(TAG, "SVGAVideoEntity prepare start")
+                            videoItem.prepare({
+                                LogUtils.info(TAG, "SVGAVideoEntity prepare success")
+                                this.invokeCompleteCallback(videoItem, callback, alias)
+                            }, playCallback)
+
+                        } ?: this.invokeErrorCallback(
+                            Exception("inflate(bytes) cause exception"),
+                            callback,
+                            alias
+                        )
+                    }
+                } ?: this.invokeErrorCallback(
+                    Exception("readAsBytes(inputStream) cause exception"),
+                    callback,
+                    alias
+                )
+            } catch (e: java.lang.Exception) {
+                this.invokeErrorCallback(e, callback, alias)
+            } finally {
+                inputStream.close()
+                LogUtils.info(
+                    TAG,
+                    "================ decode $alias from input stream end ================"
+                )
+            }
+        }
+    }
+
     /**
      * @deprecated from 2.4.0
      */
