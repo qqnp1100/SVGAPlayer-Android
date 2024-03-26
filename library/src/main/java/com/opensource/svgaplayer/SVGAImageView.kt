@@ -283,7 +283,6 @@ open class SVGAImageView @JvmOverloads constructor(
         if (videoItem == null) {
             setImageDrawable(null)
         } else {
-
             val drawable = SVGADrawable(videoItem, dynamicItem ?: SVGADynamicEntity())
             drawable.cleared = false
             setImageDrawable(drawable)
@@ -353,6 +352,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        (drawable as? SVGADrawable)?.dynamicItem?.updateCallBack = null
         removeCallbacks(updateSvagDrawableCallBack)
         stopAnimation(clearsAfterDetached)
         if (clearsAfterDetached) {

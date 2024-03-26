@@ -401,6 +401,15 @@ class SVGAVideoEntity {
         return total
     }
 
+    fun isRecycleImage(): Boolean {
+        for (mutableEntry in imageMap) {
+            if(mutableEntry.value.isRecycled){
+                return true
+            }
+        }
+        return false
+    }
+
     fun clear() {
         if (SVGASoundManager.isInit()) {
             this.audioList.forEach {
