@@ -639,8 +639,10 @@ class SVGAParser(context: Context?) {
         LogUtils.info(TAG, "================ decode file from input stream ================")
         threadPoolExecutor.execute {
             val alias = "file"
-            val inputStream = File(path).inputStream()
+            val file = File(path)
+            var inputStream: FileInputStream? = null
             try {
+                inputStream = file.inputStream()
                 readAsBytes(inputStream)?.let { bytes ->
                     if (isZipFile(bytes)) {
                         LogUtils.info(TAG, "decode from zip file")
@@ -712,7 +714,7 @@ class SVGAParser(context: Context?) {
             } catch (e: java.lang.Exception) {
                 this.invokeErrorCallback(e, callback, alias)
             } finally {
-                inputStream.close()
+                inputStream?.close()
                 LogUtils.info(
                     TAG,
                     "================ decode $alias from input stream end ================"
