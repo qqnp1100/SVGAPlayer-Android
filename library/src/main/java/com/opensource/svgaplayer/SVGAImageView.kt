@@ -4,10 +4,13 @@ import android.animation.Animator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Rect
 import android.os.Build
 import android.util.AttributeSet
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.animation.LinearInterpolator
 import androidx.appcompat.widget.AppCompatImageView
 import com.opensource.svgaplayer.utils.SVGARange
@@ -15,14 +18,15 @@ import com.opensource.svgaplayer.utils.log.LogUtils
 import java.lang.ref.WeakReference
 import java.net.URL
 
+
 /**
  * Created by PonyCui on 2017/3/29.
  */
 open class SVGAImageView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-    defStyleAttr: Int = 0
-) : AppCompatImageView(context, attrs, defStyleAttr) {
+    defStyleAttr: Int = 0,
+) : AppCompatImageView(context, attrs, defStyleAttr), ViewTreeObserver.OnPreDrawListener {
 
     private val TAG = "SVGAImageView"
 
@@ -60,6 +64,11 @@ open class SVGAImageView @JvmOverloads constructor(
         updateSvagDrawableCallBackWait = false
         getSVGADrawable()?.invalidateSelf()
     }
+
+    private var isViewVisible = true
+    private var isRectVisible = true
+    var pauseWhenHide = true
+    private var visibleRect: Rect = Rect()
 
     init {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR2) {
@@ -201,11 +210,26 @@ open class SVGAImageView @JvmOverloads constructor(
 
     private fun onAnimatorUpdate(animator: ValueAnimator?) {
         val drawable = getSVGADrawable() ?: return
-        drawable.currentFrame = animator?.animatedValue as Int
+        if (!isViewVisible && !isRectVisible && pauseWhenHide) {
+            drawable.updateCurrentFrame(animator?.animatedValue as Int, false)
+        } else {
+            drawable.updateCurrentFrame(animator?.animatedValue as Int)
+        }
         val percentage =
             (drawable.currentFrame + 1).toDouble() / drawable.videoItem.frames.toDouble()
         callback?.onStep(drawable.currentFrame, percentage)
     }
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        this.isViewVisible = isVisible
+    }
+
+    override fun onPreDraw(): Boolean {
+        isRectVisible = getGlobalVisibleRect(visibleRect)
+        return true
+    }
+
 
     private fun onAnimationEnd(animation: Animator?) {
         isAnimating = false
@@ -214,11 +238,11 @@ open class SVGAImageView @JvmOverloads constructor(
         if (drawable != null) {
             when (fillMode) {
                 FillMode.Backward -> {
-                    drawable.currentFrame = mStartFrame
+                    drawable.updateCurrentFrame(mStartFrame)
                 }
 
                 FillMode.Forward -> {
-                    drawable.currentFrame = mEndFrame
+                    drawable.updateCurrentFrame(mEndFrame)
                 }
 
                 FillMode.Clear -> {
@@ -278,7 +302,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     fun setStaticVideoItem(
         videoItem: SVGAVideoEntity?,
-        dynamicItem: SVGADynamicEntity?
+        dynamicItem: SVGADynamicEntity?,
     ): SVGADrawable? {
         if (videoItem == null) {
             setImageDrawable(null)
@@ -307,7 +331,7 @@ open class SVGAImageView @JvmOverloads constructor(
     fun stepToFrame(frame: Int, andPlay: Boolean) {
         pauseAnimation()
         val drawable = getSVGADrawable() ?: return
-        drawable.currentFrame = frame
+        drawable.updateCurrentFrame(frame)
         if (andPlay) {
             startAnimation()
             mAnimator?.let {
@@ -350,7 +374,13 @@ open class SVGAImageView @JvmOverloads constructor(
         return super.onTouchEvent(event)
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        viewTreeObserver.addOnPreDrawListener(this)
+    }
+
     override fun onDetachedFromWindow() {
+        viewTreeObserver.removeOnPreDrawListener(this)
         super.onDetachedFromWindow()
         (drawable as? SVGADrawable)?.dynamicItem?.updateCallBack = null
         removeCallbacks(updateSvagDrawableCallBack)
@@ -359,6 +389,7 @@ open class SVGAImageView @JvmOverloads constructor(
             clear()
         }
     }
+
 
     private class AnimatorListener(view: SVGAImageView) : Animator.AnimatorListener {
         private val weakReference = WeakReference<SVGAImageView>(view)
