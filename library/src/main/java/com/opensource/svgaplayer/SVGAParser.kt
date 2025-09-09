@@ -56,7 +56,7 @@ class SVGAParser(context: Context?) {
         open fun resume(
             url: URL,
             complete: (bytes: ByteArray) -> Unit,
-            failure: (e: Exception) -> Unit
+            failure: (e: Exception) -> Unit,
         ): () -> Unit {
             var cancelled = false
             val cancelBlock = {
@@ -143,7 +143,7 @@ class SVGAParser(context: Context?) {
             frameWidth: Int,
             frameHeight: Int,
             videoWidth: Int,
-            videoHeight: Int
+            videoHeight: Int,
         ): Bitmap?
 
         /**
@@ -162,14 +162,14 @@ class SVGAParser(context: Context?) {
             frameWidth: Int,
             frameHeight: Int,
             videoWidth: Int,
-            videoHeight: Int
+            videoHeight: Int,
         ): Bitmap?
 
         fun onClean(bitmap: Bitmap)
     }
 
     interface CustomDynamicImageLoad {
-        fun loadImage(url: String, forKey: String, callback: ((bitmap: Bitmap) -> Unit)? = null)
+        suspend fun loadImage(imageView: ImageView, url: String, forKey: String): Bitmap?
     }
 
     companion object {
@@ -189,7 +189,7 @@ class SVGAParser(context: Context?) {
                 frameWidth: Int,
                 frameHeight: Int,
                 videoWidth: Int,
-                videoHeight: Int
+                videoHeight: Int,
             ): Bitmap? {
                 return SVGABitmapFileDecoder.decodeBitmapFrom(
                     path,
@@ -210,7 +210,7 @@ class SVGAParser(context: Context?) {
                 frameWidth: Int,
                 frameHeight: Int,
                 videoWidth: Int,
-                videoHeight: Int
+                videoHeight: Int,
             ): Bitmap? {
                 return SVGABitmapByteArrayDecoder.decodeBitmapFrom(
                     byteArray,
@@ -303,7 +303,7 @@ class SVGAParser(context: Context?) {
     fun decodeFromURL(
         url: URL,
         callback: ParseCompletion?,
-        playCallback: PlayCallback? = null
+        playCallback: PlayCallback? = null,
     ): (() -> Unit)? {
         return decodeFromURL(url, callback, playCallback, 0, 0)
     }
@@ -313,7 +313,7 @@ class SVGAParser(context: Context?) {
         callback: ParseCompletion?,
         playCallback: PlayCallback? = null,
         frameWidth: Int = 0,
-        frameHeight: Int = 0
+        frameHeight: Int = 0,
     ): (() -> Unit)? {
         if (mContext == null) {
             LogUtils.error(TAG, "在配置 SVGAParser context 前, 无法解析 SVGA 文件。")
@@ -376,7 +376,7 @@ class SVGAParser(context: Context?) {
         playCallback: PlayCallback?,
         alias: String? = null,
         frameWidth: Int = 0,
-        frameHeight: Int = 0
+        frameHeight: Int = 0,
     ) {
         val bitmapWidth = if (frameWidth > 0) frameWidth else mFrameWidth
         val bitmapHeight = if (frameHeight > 0) frameHeight else mFrameHeight
@@ -442,7 +442,7 @@ class SVGAParser(context: Context?) {
         playCallback: PlayCallback? = null,
         alias: String? = null,
         frameWidth: Int = 0,
-        frameHeight: Int = 0
+        frameHeight: Int = 0,
     ) {
         if (mContext == null) {
             LogUtils.error(TAG, "在配置 SVGAParser context 前, 无法解析 SVGA 文件。")
@@ -534,7 +534,7 @@ class SVGAParser(context: Context?) {
         playCallback: PlayCallback? = null,
         alias: String? = null,
         frameWidth: Int = 0,
-        frameHeight: Int = 0
+        frameHeight: Int = 0,
     ) {
         if (mContext == null) {
             LogUtils.error(TAG, "在配置 SVGAParser context 前, 无法解析 SVGA 文件。")
@@ -633,7 +633,7 @@ class SVGAParser(context: Context?) {
         callback: ParseCompletion?,
         playCallback: PlayCallback? = null,
         frameWidth: Int = 0,
-        frameHeight: Int = 0
+        frameHeight: Int = 0,
     ) {
         if (mContext == null) {
             LogUtils.error(TAG, "在配置 SVGAParser context 前, 无法解析 SVGA 文件。")
@@ -761,7 +761,7 @@ class SVGAParser(context: Context?) {
         inputStream: InputStream,
         cacheKey: String,
         callback: ParseCompletion?,
-        closeInputStream: Boolean = false
+        closeInputStream: Boolean = false,
     ) {
         this.decodeFromInputStream(inputStream, cacheKey, callback, closeInputStream, null)
     }
@@ -769,7 +769,7 @@ class SVGAParser(context: Context?) {
     private fun invokeCompleteCallback(
         videoItem: SVGAVideoEntity,
         callback: ParseCompletion?,
-        alias: String?
+        alias: String?,
     ) {
         Handler(Looper.getMainLooper()).post {
             LogUtils.info(TAG, "================ $alias parser complete ================")
@@ -780,7 +780,7 @@ class SVGAParser(context: Context?) {
     private fun invokeErrorCallback(
         e: Exception,
         callback: ParseCompletion?,
-        alias: String?
+        alias: String?,
     ) {
         e.printStackTrace()
         LogUtils.error(TAG, "================ $alias parser error ================")
@@ -795,7 +795,7 @@ class SVGAParser(context: Context?) {
         callback: ParseCompletion?,
         alias: String?,
         frameWidth: Int = 0,
-        frameHeight: Int = 0
+        frameHeight: Int = 0,
     ) {
         LogUtils.info(TAG, "================ decode $alias from cache ================")
         LogUtils.debug(TAG, "decodeFromCacheKey called with cacheKey : $cacheKey")

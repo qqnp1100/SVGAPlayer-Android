@@ -271,7 +271,6 @@ open class SVGAImageView @JvmOverloads constructor(
 
     fun clear() {
         getSVGADrawable()?.cleared = true
-        getSVGADrawable()?.dynamicItem?.updateCallBack = null
         getSVGADrawable()?.clear()
         // 清除对 drawable 的引用
         setImageDrawable(null)
@@ -305,10 +304,8 @@ open class SVGAImageView @JvmOverloads constructor(
             val drawable = SVGADrawable(videoItem, dynamicItem ?: SVGADynamicEntity())
             drawable.cleared = true
             setImageDrawable(drawable)
-            dynamicItem?.updateCallBack = {
-                updateSvagDrawable()
-            }
-            startLoadDynamicItemImage(videoItem)
+            startLoadVideoItemImage(videoItem)
+            startLoadDynamicItemImage(dynamicItem)
         }
     }
 
@@ -327,18 +324,29 @@ open class SVGAImageView @JvmOverloads constructor(
             val drawable = SVGADrawable(videoItem, dynamicItem ?: SVGADynamicEntity())
             drawable.cleared = false
             setImageDrawable(drawable)
-            dynamicItem?.updateCallBack = {
-                updateSvagDrawable()
-            }
-            startLoadDynamicItemImage(videoItem)
+            startLoadVideoItemImage(videoItem)
+            startLoadDynamicItemImage(dynamicItem)
             return drawable
         }
         return null
     }
 
-    private fun startLoadDynamicItemImage(videoItem: SVGAVideoEntity) {
+    private fun startLoadVideoItemImage(videoItem: SVGAVideoEntity) {
         scope.launch {
             videoItem.parserImages(this@SVGAImageView)
+            launch(Dispatchers.Main) {
+                updateSvagDrawable()
+            }
+        }
+    }
+
+    private fun startLoadDynamicItemImage(dynamicItem: SVGADynamicEntity?) {
+        dynamicItem ?: return
+        scope.launch {
+            dynamicItem.requestDynamicImage(this@SVGAImageView)
+            launch(Dispatchers.Main) {
+                updateSvagDrawable()
+            }
         }
     }
 
@@ -407,7 +415,6 @@ open class SVGAImageView @JvmOverloads constructor(
         scope.close()
         viewTreeObserver.removeOnPreDrawListener(this)
         super.onDetachedFromWindow()
-        (drawable as? SVGADrawable)?.dynamicItem?.updateCallBack = null
         removeCallbacks(updateSvagDrawableCallBack)
         stopAnimation(clearsAfterDetached)
         if (clearsAfterDetached) {

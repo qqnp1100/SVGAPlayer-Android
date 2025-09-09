@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.text.BoringLayout
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.widget.ImageView
 import com.opensource.svgaplayer.utils.log.LogUtils
 import java.net.HttpURLConnection
 import java.net.URL
@@ -19,6 +20,8 @@ class SVGADynamicEntity {
 
     internal var dynamicInImage: HashMap<String, Bitmap> = hashMapOf()
     internal var dynamicOutImage: HashMap<String, Bitmap> = hashMapOf()
+
+    internal var dynamicOutImageKeyUrl = hashMapOf<String, String>()
 
     internal var dynamicText: HashMap<String, String> = hashMapOf()
     internal var dynamicScrollTextSpeed: HashMap<String, Float> = hashMapOf()
@@ -42,7 +45,6 @@ class SVGADynamicEntity {
 
     internal var isTextDirty = false
 
-    var updateCallBack: (() -> Unit)? = null
 
     var srcollTextSpace = 10f
 
@@ -59,27 +61,28 @@ class SVGADynamicEntity {
     }
 
     fun setDynamicImage(url: String, forKey: String) {
+        dynamicOutImageKeyUrl[forKey] = url
+    }
+
+    suspend fun requestDynamicImage(imageView: ImageView) {
         if (SVGAParser.customDynamicImageLoad != null) {
-            SVGAParser.customDynamicImageLoad?.loadImage(url, forKey) {
-                SVGAParser.handler().post {
-                    dynamicOutImage[forKey] = it
-                    updateCallBack?.invoke()
-                }
+            for (entry in dynamicOutImageKeyUrl) {
+                SVGAParser.customDynamicImageLoad?.loadImage(imageView, entry.value, entry.key)
+                    ?.let {
+                        dynamicOutImage[entry.key] = it
+                    }
             }
             return
         }
-        SVGAParser.threadPoolExecutor.execute {
-            (URL(url).openConnection() as? HttpURLConnection)?.let {
+        for (entry in dynamicOutImageKeyUrl) {
+            (URL(entry.value).openConnection() as? HttpURLConnection)?.let {
                 try {
                     it.connectTimeout = 20 * 1000
                     it.requestMethod = "GET"
                     it.connect()
                     it.inputStream.use { stream ->
                         BitmapFactory.decodeStream(stream)?.let {
-                            SVGAParser.handler().post {
-                                dynamicInImage[forKey] = it
-                                updateCallBack?.invoke()
-                            }
+                            dynamicInImage[entry.key] = it
                         }
                     }
                 } catch (e: Exception) {
@@ -166,7 +169,7 @@ class SVGADynamicEntity {
 
     fun setDynamicDrawerSized(
         drawer: (canvas: Canvas, frameIndex: Int, width: Int, height: Int) -> Boolean,
-        forKey: String
+        forKey: String,
     ) {
         this.dynamicDrawerSized.put(forKey, drawer)
     }
