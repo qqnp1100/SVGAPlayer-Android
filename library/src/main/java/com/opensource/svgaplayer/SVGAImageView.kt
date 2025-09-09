@@ -15,8 +15,15 @@ import android.view.animation.LinearInterpolator
 import androidx.appcompat.widget.AppCompatImageView
 import com.opensource.svgaplayer.utils.SVGARange
 import com.opensource.svgaplayer.utils.log.LogUtils
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import java.io.Closeable
 import java.lang.ref.WeakReference
 import java.net.URL
+import kotlin.coroutines.CoroutineContext
 
 
 /**
@@ -65,6 +72,15 @@ open class SVGAImageView @JvmOverloads constructor(
         getSVGADrawable()?.invalidateSelf()
     }
 
+    internal class CloseableCoroutineScope(context: CoroutineContext) : Closeable, CoroutineScope {
+        override val coroutineContext: CoroutineContext = context
+
+        override fun close() {
+            coroutineContext.cancel()
+        }
+    }
+
+    private val scope = CloseableCoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var isViewVisible = true
     private var isRectVisible = true
     var pauseWhenHide = true
@@ -292,6 +308,7 @@ open class SVGAImageView @JvmOverloads constructor(
             dynamicItem?.updateCallBack = {
                 updateSvagDrawable()
             }
+            startLoadDynamicItemImage(videoItem)
         }
     }
 
@@ -313,9 +330,16 @@ open class SVGAImageView @JvmOverloads constructor(
             dynamicItem?.updateCallBack = {
                 updateSvagDrawable()
             }
+            startLoadDynamicItemImage(videoItem)
             return drawable
         }
         return null
+    }
+
+    private fun startLoadDynamicItemImage(videoItem: SVGAVideoEntity) {
+        scope.launch {
+            videoItem.parserImages(this@SVGAImageView)
+        }
     }
 
     private fun updateSvagDrawable() {
@@ -380,6 +404,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        scope.close()
         viewTreeObserver.removeOnPreDrawListener(this)
         super.onDetachedFromWindow()
         (drawable as? SVGADrawable)?.dynamicItem?.updateCallBack = null

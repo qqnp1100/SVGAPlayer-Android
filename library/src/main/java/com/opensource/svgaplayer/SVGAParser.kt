@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.net.http.HttpResponseCache
 import android.os.Handler
 import android.os.Looper
+import android.widget.ImageView
 import com.opensource.svgaplayer.bitmap.SVGABitmapByteArrayDecoder
 import com.opensource.svgaplayer.bitmap.SVGABitmapFileDecoder
 import com.opensource.svgaplayer.proto.MovieEntity
@@ -135,6 +136,7 @@ class SVGAParser(context: Context?) {
          * @param videoHeight svga的高
          */
         fun onLoad(
+            imageView: ImageView,
             path: String,
             scaleX: Float,
             scaleY: Float,
@@ -153,6 +155,7 @@ class SVGAParser(context: Context?) {
          * @param videoHeight svga的高
          */
         fun onLoad(
+            imageView: ImageView,
             byteArray: ByteArray,
             scaleX: Float,
             scaleY: Float,
@@ -179,6 +182,7 @@ class SVGAParser(context: Context?) {
         var customDynamicImageLoad: CustomDynamicImageLoad? = null
         private var customBitmapDecoder: BitmapDecoder = object : BitmapDecoder {
             override fun onLoad(
+                imageView: ImageView,
                 path: String,
                 scaleX: Float,
                 scaleY: Float,
@@ -199,6 +203,7 @@ class SVGAParser(context: Context?) {
             }
 
             override fun onLoad(
+                imageView: ImageView,
                 byteArray: ByteArray,
                 scaleX: Float,
                 scaleY: Float,
