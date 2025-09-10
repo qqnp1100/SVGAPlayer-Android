@@ -431,8 +431,10 @@ class SVGAVideoEntity {
 
     fun imageMapSize(): Int {
         var total = 0
-        imageMap.map {
-            total += it.value.width * it.value.height * 4
+        synchronized(imageMap){
+            imageMap.map {
+                total += it.value.width * it.value.height * 4
+            }
         }
         return total
     }
@@ -460,10 +462,12 @@ class SVGAVideoEntity {
             it.clear()
         }
         spriteList = emptyList()
-        imageMap.map {
-            SVGAParser.getBitmapDecoder().onClean(it.value)
+        synchronized(imageMap){
+            imageMap.map {
+                SVGAParser.getBitmapDecoder().onClean(it.value)
+            }
+            imageMap.clear()
         }
-        imageMap.clear()
         scaleMap.clear()
     }
 }
