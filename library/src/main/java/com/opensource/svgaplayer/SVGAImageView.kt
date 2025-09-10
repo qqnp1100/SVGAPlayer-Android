@@ -80,7 +80,7 @@ open class SVGAImageView @JvmOverloads constructor(
         }
     }
 
-    private val scope = CloseableCoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var scope: CloseableCoroutineScope? = null
     private var isViewVisible = true
     private var isRectVisible = true
     var pauseWhenHide = true
@@ -332,7 +332,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     private fun startLoadVideoItemImage(videoItem: SVGAVideoEntity) {
-        scope.launch {
+        scope?.launch {
             videoItem.parserImages(this@SVGAImageView)
             launch(Dispatchers.Main) {
                 updateSvagDrawable()
@@ -342,7 +342,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     private fun startLoadDynamicItemImage(dynamicItem: SVGADynamicEntity?) {
         dynamicItem ?: return
-        scope.launch {
+        scope?.launch {
             dynamicItem.requestDynamicImage(this@SVGAImageView)
             launch(Dispatchers.Main) {
                 updateSvagDrawable()
@@ -407,12 +407,14 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     override fun onAttachedToWindow() {
+        scope?.close()
+        scope = CloseableCoroutineScope(SupervisorJob() + Dispatchers.IO)
         super.onAttachedToWindow()
         viewTreeObserver.addOnPreDrawListener(this)
     }
 
     override fun onDetachedFromWindow() {
-        scope.close()
+        scope?.close()
         viewTreeObserver.removeOnPreDrawListener(this)
         super.onDetachedFromWindow()
         removeCallbacks(updateSvagDrawableCallBack)
