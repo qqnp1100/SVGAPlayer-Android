@@ -58,6 +58,7 @@ class SVGAVideoEntity {
     private var mPlayCallback: SVGAParser.PlayCallback? = null
     private lateinit var mCallback: () -> Unit
     private var imageJson: JSONObject? = null
+    private var isClean = false
 
     constructor(json: JSONObject, cacheDir: File) : this(json, cacheDir, 0, 0)
 
@@ -141,11 +142,49 @@ class SVGAVideoEntity {
             }
             val bitmapKey = imgKey.replace(".matte", "")
             val maxScale = scaleMap[imgKey] ?: Pair(1f, 1f)
-            val lastBitmap = imageMap[bitmapKey]
+            var lastBitmap: Bitmap? = null
+            synchronized(imageMap) {
+                lastBitmap = imageMap[bitmapKey]
+            }
             if (lastBitmap == null || lastBitmap.isRecycled) {
                 val bitmap = createBitmap(imageView, filePath, maxScale.first, maxScale.second)
-                if (bitmap != null) {
-                    imageMap[bitmapKey] = bitmap
+                if (bitmap != null && !isClean) {
+                    synchronized(imageMap) {
+                        imageMap[bitmapKey] = bitmap
+                    }
+                }
+            }
+        }
+    }
+
+    private fun parserImages(imageView: ImageView, obj: MovieEntity) {
+        obj.images?.entries?.forEach { entry ->
+            val byteArray = entry.value.toByteArray()
+            if (byteArray.count() < 4) {
+                return@forEach
+            }
+            val fileTag = byteArray.slice(IntRange(0, 3))
+            if (fileTag[0].toInt() == 73 && fileTag[1].toInt() == 68 && fileTag[2].toInt() == 51) {
+                return@forEach
+            }
+            val maxScale = scaleMap[entry.key] ?: Pair(1f, 1f)
+            var lastBitmap: Bitmap? = null
+            synchronized(imageMap) {
+                lastBitmap = imageMap[entry.key]
+            }
+            if (lastBitmap == null || lastBitmap.isRecycled) {
+                createBitmap(
+                    imageView,
+                    byteArray,
+                    entry.key,
+                    maxScale.first,
+                    maxScale.second
+                )?.let { bitmap ->
+                    if(!isClean){
+                        synchronized(imageMap) {
+                            imageMap[entry.key] = bitmap
+                        }
+                    }
                 }
             }
         }
@@ -180,32 +219,6 @@ class SVGAVideoEntity {
             videoSize.width.toInt(),
             videoSize.height.toInt()
         )
-    }
-
-    private fun parserImages(imageView: ImageView, obj: MovieEntity) {
-        obj.images?.entries?.forEach { entry ->
-            val byteArray = entry.value.toByteArray()
-            if (byteArray.count() < 4) {
-                return@forEach
-            }
-            val fileTag = byteArray.slice(IntRange(0, 3))
-            if (fileTag[0].toInt() == 73 && fileTag[1].toInt() == 68 && fileTag[2].toInt() == 51) {
-                return@forEach
-            }
-            val maxScale = scaleMap[entry.key] ?: Pair(1f, 1f)
-            val lastBitmap = imageMap[entry.key]
-            if (lastBitmap == null || lastBitmap.isRecycled) {
-                createBitmap(
-                    imageView,
-                    byteArray,
-                    entry.key,
-                    maxScale.first,
-                    maxScale.second
-                )?.let { bitmap ->
-                    imageMap[entry.key] = bitmap
-                }
-            }
-        }
     }
 
     private fun createBitmap(
@@ -431,7 +444,7 @@ class SVGAVideoEntity {
 
     fun imageMapSize(): Int {
         var total = 0
-        synchronized(imageMap){
+        synchronized(imageMap) {
             imageMap.map {
                 total += it.value.width * it.value.height * 4
             }
@@ -440,15 +453,21 @@ class SVGAVideoEntity {
     }
 
     fun isRecycleImage(): Boolean {
-        for (mutableEntry in imageMap) {
-            if (mutableEntry.value.isRecycled) {
-                return true
+        if (isClean) {
+            return true
+        }
+        synchronized(imageMap) {
+            for (mutableEntry in imageMap) {
+                if (mutableEntry.value.isRecycled) {
+                    return true
+                }
             }
         }
         return false
     }
 
     fun clear() {
+        isClean = true
         if (SVGASoundManager.isInit()) {
             this.audioList.forEach {
                 it.soundID?.let { id -> SVGASoundManager.unload(id) }
@@ -462,7 +481,7 @@ class SVGAVideoEntity {
             it.clear()
         }
         spriteList = emptyList()
-        synchronized(imageMap){
+        synchronized(imageMap) {
             imageMap.map {
                 SVGAParser.getBitmapDecoder().onClean(it.value)
             }
