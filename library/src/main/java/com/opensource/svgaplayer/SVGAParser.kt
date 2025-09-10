@@ -904,7 +904,7 @@ class SVGAParser(context: Context?) {
                 }
                 return byteArrayOutputStream.toUnSafeByteArray()
             }
-        }catch (e: Throwable){
+        } catch (e: Throwable) {
             LogUtils.info(TAG, "inflate error ${e}")
             return null
         }
@@ -930,8 +930,9 @@ class SVGAParser(context: Context?) {
                 return b
             }
         } catch (e: Throwable) {
-            inflater.end()
             LogUtils.info(TAG, "inflate error ${e}")
+        } finally {
+            inflater.end()
         }
         return null
     }
