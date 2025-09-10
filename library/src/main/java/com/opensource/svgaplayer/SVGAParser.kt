@@ -12,7 +12,14 @@ import com.opensource.svgaplayer.proto.MovieEntity
 import com.opensource.svgaplayer.utils.MyByteArrayOutputStream
 import com.opensource.svgaplayer.utils.log.LogUtils
 import org.json.JSONObject
-import java.io.*
+import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -879,43 +886,54 @@ class SVGAParser(context: Context?) {
     }
 
     private fun readAsBytes(inputStream: InputStream): ByteArray? {
-        MyByteArrayOutputStream(
-            Math.max(
-                inputStream.available(),
-                32
-            )
-        ).use { byteArrayOutputStream ->
-            val byteArray = ByteArray(2048)
-            while (true) {
-                val count = inputStream.read(byteArray, 0, 2048)
-                if (count <= 0) {
-                    break
-                } else {
-                    byteArrayOutputStream.write(byteArray, 0, count)
+        try {
+            MyByteArrayOutputStream(
+                Math.max(
+                    inputStream.available(),
+                    32
+                )
+            ).use { byteArrayOutputStream ->
+                val byteArray = ByteArray(2048)
+                while (true) {
+                    val count = inputStream.read(byteArray, 0, 2048)
+                    if (count <= 0) {
+                        break
+                    } else {
+                        byteArrayOutputStream.write(byteArray, 0, count)
+                    }
                 }
+                return byteArrayOutputStream.toUnSafeByteArray()
             }
-            return byteArrayOutputStream.toUnSafeByteArray()
+        }catch (e: Throwable){
+            LogUtils.info(TAG, "inflate error ${e}")
+            return null
         }
     }
 
     private fun inflate(byteArray: ByteArray): ByteArray? {
         val inflater = Inflater()
-        inflater.setInput(byteArray, 0, byteArray.size)
-        val inflatedBytes = ByteArray(2048)
-        MyByteArrayOutputStream().use { inflatedOutputStream ->
-            while (true) {
-                val count = inflater.inflate(inflatedBytes, 0, 2048)
-                if (count <= 0) {
-                    break
-                } else {
-                    inflatedOutputStream.write(inflatedBytes, 0, count)
+        val byteArrayOutputStream = MyByteArrayOutputStream()
+        try {
+            inflater.setInput(byteArray, 0, byteArray.size)
+            val inflatedBytes = ByteArray(2048)
+            byteArrayOutputStream.use { inflatedOutputStream ->
+                while (true) {
+                    val count = inflater.inflate(inflatedBytes, 0, 2048)
+                    if (count <= 0) {
+                        break
+                    } else {
+                        inflatedOutputStream.write(inflatedBytes, 0, count)
+                    }
                 }
+                val b = inflatedOutputStream.toByteArray()
+                inflatedOutputStream.reset()
+                return b
             }
+        } catch (e: Throwable) {
             inflater.end()
-            val b = inflatedOutputStream.toByteArray()
-            inflatedOutputStream.reset()
-            return b
+            LogUtils.info(TAG, "inflate error ${e}")
         }
+        return null
     }
 
     // 是否是 zip 文件
