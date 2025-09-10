@@ -136,6 +136,9 @@ class SVGAVideoEntity {
 
     private fun parserImages(imageView: ImageView, imgJson: JSONObject) {
         imgJson.keys().forEach { imgKey ->
+            if (isClean) {
+                return
+            }
             val filePath = generateBitmapFilePath(imgJson[imgKey].toString(), imgKey)
             if (filePath.isEmpty()) {
                 return
@@ -159,6 +162,9 @@ class SVGAVideoEntity {
 
     private fun parserImages(imageView: ImageView, obj: MovieEntity) {
         obj.images?.entries?.forEach { entry ->
+            if (isClean) {
+                return
+            }
             val byteArray = entry.value.toByteArray()
             if (byteArray.count() < 4) {
                 return@forEach
@@ -180,7 +186,7 @@ class SVGAVideoEntity {
                     maxScale.first,
                     maxScale.second
                 )?.let { bitmap ->
-                    if(!isClean){
+                    if (!isClean) {
                         synchronized(imageMap) {
                             imageMap[entry.key] = bitmap
                         }
