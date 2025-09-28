@@ -83,6 +83,7 @@ open class SVGAImageView @JvmOverloads constructor(
     private var scope: CloseableCoroutineScope? = null
     private var isViewVisible = true
     private var isRectVisible = true
+    private var isAddOnPreDraw = false
     var pauseWhenHide = true
     private var visibleRect: Rect = Rect()
 
@@ -410,12 +411,18 @@ open class SVGAImageView @JvmOverloads constructor(
         scope?.close()
         scope = CloseableCoroutineScope(SupervisorJob() + Dispatchers.IO)
         super.onAttachedToWindow()
-        viewTreeObserver.addOnPreDrawListener(this)
+        if (!isAddOnPreDraw) {
+            viewTreeObserver.addOnPreDrawListener(this)
+            isAddOnPreDraw = true
+        }
     }
 
     override fun onDetachedFromWindow() {
         scope?.close()
-        viewTreeObserver.removeOnPreDrawListener(this)
+        if (isAddOnPreDraw) {
+            viewTreeObserver.removeOnPreDrawListener(this)
+            isAddOnPreDraw = false
+        }
         super.onDetachedFromWindow()
         removeCallbacks(updateSvagDrawableCallBack)
         stopAnimation(clearsAfterDetached)
