@@ -11,6 +11,7 @@ import com.opensource.svgaplayer.bitmap.SVGABitmapFileDecoder
 import com.opensource.svgaplayer.proto.MovieEntity
 import com.opensource.svgaplayer.utils.MyByteArrayOutputStream
 import com.opensource.svgaplayer.utils.log.LogUtils
+import kotlinx.coroutines.asCoroutineDispatcher
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
@@ -238,9 +239,11 @@ class SVGAParser(context: Context?) {
         internal var threadPoolExecutor = Executors.newCachedThreadPool { r ->
             Thread(r, "SVGAParser-Thread-${threadNum.getAndIncrement()}")
         }
+        internal var coroutineDispatcher = threadPoolExecutor.asCoroutineDispatcher()
 
         fun setThreadPoolExecutor(executor: ThreadPoolExecutor) {
             threadPoolExecutor = executor
+            coroutineDispatcher = threadPoolExecutor.asCoroutineDispatcher()
         }
 
         fun shareParser(): SVGAParser {

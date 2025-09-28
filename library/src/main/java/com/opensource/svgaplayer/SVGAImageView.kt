@@ -409,7 +409,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         scope?.close()
-        scope = CloseableCoroutineScope(SupervisorJob() + Dispatchers.IO)
+        scope = CloseableCoroutineScope(SupervisorJob() + SVGAParser.coroutineDispatcher)
         super.onAttachedToWindow()
         if (!isAddOnPreDraw) {
             viewTreeObserver.addOnPreDrawListener(this)
