@@ -5,6 +5,7 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Rect
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.util.AttributeSet
 import android.util.Log
@@ -292,6 +293,18 @@ open class SVGAImageView @JvmOverloads constructor(
         mAnimator?.removeAllUpdateListeners()
         getSVGADrawable()?.stop()
         getSVGADrawable()?.cleared = clear
+    }
+
+    override fun setImageDrawable(drawable: Drawable?) {
+        super.setImageDrawable(drawable)
+        if (drawable is SVGADrawable) {
+            drawable.videoItem.let {
+                startLoadVideoItemImage(it)
+            }
+            drawable.dynamicItem.let {
+                startLoadDynamicItemImage(it)
+            }
+        }
     }
 
     fun setVideoItem(videoItem: SVGAVideoEntity?) {
