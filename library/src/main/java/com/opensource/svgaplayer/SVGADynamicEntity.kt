@@ -48,6 +48,7 @@ class SVGADynamicEntity {
 
     var srcollTextSpace = 10f
     private var isClean = false
+    private var isLoad = false
 
     fun setHidden(value: Boolean, forKey: String) {
         this.dynamicHidden.put(forKey, value)
@@ -66,6 +67,10 @@ class SVGADynamicEntity {
     }
 
     suspend fun requestDynamicImage(imageView: ImageView) {
+        if (isLoad) {
+            return
+        }
+        isLoad = true
         if (SVGAParser.customDynamicImageLoad != null) {
             for (entry in dynamicOutImageKeyUrl) {
                 if (isClean) {
@@ -182,6 +187,7 @@ class SVGADynamicEntity {
     }
 
     fun clearDynamicObjects() {
+        isLoad = false
         this.isClean = true
         this.isTextDirty = true
         this.dynamicHidden.clear()

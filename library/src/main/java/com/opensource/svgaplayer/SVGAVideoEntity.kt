@@ -60,6 +60,8 @@ class SVGAVideoEntity {
     private var imageJson: JSONObject? = null
     private var isClean = false
 
+    private var isParser = false
+
     constructor(json: JSONObject, cacheDir: File) : this(json, cacheDir, 0, 0)
 
     constructor(json: JSONObject, cacheDir: File, frameWidth: Int, frameHeight: Int) {
@@ -94,6 +96,10 @@ class SVGAVideoEntity {
     }
 
     public suspend fun parserImages(imageView: ImageView) {
+        if (isParser) {
+            return
+        }
+        isParser = true
         movieItem?.let {
             try {
                 parserImages(imageView, it)
@@ -494,6 +500,7 @@ class SVGAVideoEntity {
             imageMap.clear()
         }
         scaleMap.clear()
+        isParser = false
     }
 }
 
