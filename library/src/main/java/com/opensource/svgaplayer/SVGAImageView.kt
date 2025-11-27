@@ -318,8 +318,6 @@ open class SVGAImageView @JvmOverloads constructor(
             val drawable = SVGADrawable(videoItem, dynamicItem ?: SVGADynamicEntity())
             drawable.cleared = true
             setImageDrawable(drawable)
-            startLoadVideoItemImage(videoItem)
-            startLoadDynamicItemImage(dynamicItem)
         }
     }
 
@@ -338,8 +336,6 @@ open class SVGAImageView @JvmOverloads constructor(
             val drawable = SVGADrawable(videoItem, dynamicItem ?: SVGADynamicEntity())
             drawable.cleared = false
             setImageDrawable(drawable)
-            startLoadVideoItemImage(videoItem)
-            startLoadDynamicItemImage(dynamicItem)
             return drawable
         }
         return null
