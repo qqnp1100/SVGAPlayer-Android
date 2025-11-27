@@ -1,4 +1,5 @@
 # 本分支修改内容（基于2.6.1版本修改）
+- SVGAVideoEntity 改为边播放边加载，实现类似渐进加载的效果（注：imageMapSize就是可变的了）
 - SvgaImageView 增加不可见时停止绘制功能
 - SVGADynamicEntity 增加 setDynamicTextScrollSpeed方法 设置速度后文字可以滚动
 - SVGAVideoEntity 增加 imageMapSize方法
