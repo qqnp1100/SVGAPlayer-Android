@@ -73,6 +73,8 @@ open class SVGAImageView @JvmOverloads constructor(
         getSVGADrawable()?.invalidateSelf()
     }
 
+    var parserImagesEndCallBack: (() -> Unit)? = null
+
     internal class CloseableCoroutineScope(context: CoroutineContext) : Closeable, CoroutineScope {
         override val coroutineContext: CoroutineContext = context
 
@@ -344,6 +346,7 @@ open class SVGAImageView @JvmOverloads constructor(
     private fun startLoadVideoItemImage(videoItem: SVGAVideoEntity) {
         scope?.launch {
             videoItem.parserImages(this@SVGAImageView)
+            parserImagesEndCallBack?.invoke()
             launch(Dispatchers.Main) {
                 updateSvagDrawable()
             }
@@ -435,6 +438,7 @@ open class SVGAImageView @JvmOverloads constructor(
         super.onDetachedFromWindow()
         removeCallbacks(updateSvagDrawableCallBack)
         stopAnimation(clearsAfterDetached)
+        parserImagesEndCallBack = null
         if (clearsAfterDetached) {
             clear()
         }

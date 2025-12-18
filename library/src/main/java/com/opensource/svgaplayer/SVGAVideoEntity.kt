@@ -7,6 +7,7 @@ import android.media.AudioManager
 import android.media.SoundPool
 import android.os.Build
 import android.util.Log
+import android.util.Size
 import android.widget.ImageView
 import com.opensource.svgaplayer.entities.SVGAAudioEntity
 import com.opensource.svgaplayer.entities.SVGAVideoSpriteEntity
@@ -93,6 +94,11 @@ class SVGAVideoEntity {
         this.movieItem = entity
         entity.params?.let(this::setupByMovie)
         resetSprites(entity)
+    }
+
+    public fun getImageSizeByKey(key: String): Size? {
+        val bitmap = imageMap[key] ?: return null
+        return Size(bitmap.width, bitmap.height)
     }
 
     public suspend fun parserImages(imageView: ImageView) {
