@@ -8,6 +8,7 @@ import android.media.SoundPool
 import android.os.Build
 import android.util.Log
 import android.util.Size
+import android.view.View
 import android.widget.ImageView
 import com.opensource.svgaplayer.entities.SVGAAudioEntity
 import com.opensource.svgaplayer.entities.SVGAVideoSpriteEntity
@@ -101,14 +102,14 @@ class SVGAVideoEntity {
         return Size(bitmap.width, bitmap.height)
     }
 
-    public suspend fun parserImages(imageView: ImageView) {
+    public suspend fun parserImages(view: View) {
         if (isParser) {
             return
         }
         isParser = true
         movieItem?.let {
             try {
-                parserImages(imageView, it)
+                parserImages(view, it)
             } catch (e: Exception) {
                 e.printStackTrace()
             } catch (e: OutOfMemoryError) {
@@ -117,7 +118,7 @@ class SVGAVideoEntity {
         }
         imageJson?.let {
             try {
-                parserImages(imageView, it)
+                parserImages(view, it)
             } catch (e: Exception) {
                 e.printStackTrace()
             } catch (e: OutOfMemoryError) {
@@ -146,7 +147,7 @@ class SVGAVideoEntity {
         }
     }
 
-    private fun parserImages(imageView: ImageView, imgJson: JSONObject) {
+    private fun parserImages(imageView: View, imgJson: JSONObject) {
         imgJson.keys().forEach { imgKey ->
             if (isClean) {
                 return
@@ -172,7 +173,7 @@ class SVGAVideoEntity {
         }
     }
 
-    private fun parserImages(imageView: ImageView, obj: MovieEntity) {
+    private fun parserImages(view: View, obj: MovieEntity) {
         obj.images?.entries?.forEach { entry ->
             if (isClean) {
                 return
@@ -192,7 +193,7 @@ class SVGAVideoEntity {
             }
             if (lastBitmap == null || lastBitmap.isRecycled) {
                 createBitmap(
-                    imageView,
+                    view,
                     byteArray,
                     entry.key,
                     maxScale.first,
@@ -222,7 +223,7 @@ class SVGAVideoEntity {
     }
 
     private fun createBitmap(
-        imageView: ImageView,
+        imageView: View,
         filePath: String,
         scaleX: Float,
         scaleY: Float,
@@ -240,7 +241,7 @@ class SVGAVideoEntity {
     }
 
     private fun createBitmap(
-        imageView: ImageView,
+        imageView: View,
         byteArray: ByteArray,
         imgKey: String,
         scaleX: Float,
