@@ -311,25 +311,27 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                             drawingTextPaint.textAlign = Paint.Align.LEFT
                         }
                     }
-                    textBitmap = Bitmap.createBitmap(
-                        bitmapWidth,
-                        drawingBitmap.height,
-                        Bitmap.Config.ARGB_8888
-                    ).apply {
-                        val drawRect = Rect(0, 0, bitmapWidth, drawingBitmap.height)
-                        val textCanvas = Canvas(this)
-                        drawingTextPaint.isAntiAlias = true
-                        val fontMetrics = drawingTextPaint.getFontMetrics();
-                        val top = fontMetrics.top
-                        val bottom = fontMetrics.bottom
-                        val baseLineY = drawRect.centerY() - top / 2 - bottom / 2
-                        textCanvas.drawText(
-                            drawingText,
-                            textDrawStart,
-                            baseLineY,
-                            drawingTextPaint
-                        );
-                        drawTextCache.put(imageKey, this)
+                    if (bitmapWidth > 0 && drawingBitmap.height > 0) {
+                        textBitmap = Bitmap.createBitmap(
+                            bitmapWidth,
+                            drawingBitmap.height,
+                            Bitmap.Config.ARGB_8888
+                        ).apply {
+                            val drawRect = Rect(0, 0, bitmapWidth, drawingBitmap.height)
+                            val textCanvas = Canvas(this)
+                            drawingTextPaint.isAntiAlias = true
+                            val fontMetrics = drawingTextPaint.getFontMetrics();
+                            val top = fontMetrics.top
+                            val bottom = fontMetrics.bottom
+                            val baseLineY = drawRect.centerY() - top / 2 - bottom / 2
+                            textCanvas.drawText(
+                                drawingText,
+                                textDrawStart,
+                                baseLineY,
+                                drawingTextPaint
+                            );
+                            drawTextCache.put(imageKey, this)
+                        }
                     }
                 }
             }
@@ -351,15 +353,17 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                         it.paint.textAlign = Paint.Align.LEFT
                     }
                 }
-                textBitmap = Bitmap.createBitmap(
-                    bitmapWidth,
-                    drawingBitmap.height,
-                    Bitmap.Config.ARGB_8888
-                ).apply {
-                    val textCanvas = Canvas(this)
-                    textCanvas.translate(0f, ((drawingBitmap.height - it.height) / 2).toFloat())
-                    it.draw(textCanvas)
-                    drawTextCache.put(imageKey, this)
+                if (bitmapWidth > 0 && drawingBitmap.height > 0) {
+                    textBitmap = Bitmap.createBitmap(
+                        bitmapWidth,
+                        drawingBitmap.height,
+                        Bitmap.Config.ARGB_8888
+                    ).apply {
+                        val textCanvas = Canvas(this)
+                        textCanvas.translate(0f, ((drawingBitmap.height - it.height) / 2).toFloat())
+                        it.draw(textCanvas)
+                        drawTextCache.put(imageKey, this)
+                    }
                 }
             }
         }
@@ -408,15 +412,17 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                         false
                     )
                 }
-                textBitmap = Bitmap.createBitmap(
-                    bitmapWidth,
-                    drawingBitmap.height,
-                    Bitmap.Config.ARGB_8888
-                )?.apply {
-                    val textCanvas = Canvas(this)
-                    textCanvas.translate(0f, ((drawingBitmap.height - layout.height) / 2).toFloat())
-                    layout.draw(textCanvas)
-                    drawTextCache.put(imageKey, this)
+                if (bitmapWidth > 0 && drawingBitmap.height > 0) {
+                    textBitmap = Bitmap.createBitmap(
+                        bitmapWidth,
+                        drawingBitmap.height,
+                        Bitmap.Config.ARGB_8888
+                    )?.apply {
+                        val textCanvas = Canvas(this)
+                        textCanvas.translate(0f, ((drawingBitmap.height - layout.height) / 2).toFloat())
+                        layout.draw(textCanvas)
+                        drawTextCache.put(imageKey, this)
+                    }
                 }
             }
         }
@@ -439,6 +445,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             } else {
                 paint.isFilterBitmap = videoItem.antiAlias
                 if (textBitmap.width > drawingBitmap.width) {
+                    if (drawingBitmap.width <= 0 || drawingBitmap.height <= 0) return@let
                     val gradientBitmap = drawTextGradientCache[imageKey] ?: kotlin.run {
                         Bitmap.createBitmap(
                             drawingBitmap.width,
@@ -754,17 +761,15 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         }
 
         fun shareMatteCanvas(width: Int, height: Int): Canvas {
+            val safeWidth = width.coerceAtLeast(1)
+            val safeHeight = height.coerceAtLeast(1)
             if (shareMatteCanvas == null) {
-                sharedMatteBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ALPHA_8)
-//                shareMatteCanvas = Canvas(sharedMatteBitmap)
+                sharedMatteBitmap = Bitmap.createBitmap(safeWidth, safeHeight, Bitmap.Config.ALPHA_8)
             }
-//            val matteCanvas = shareMatteCanvas as Canvas
-//            matteCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-//            return matteCanvas
             return Canvas(
                 sharedMatteBitmap ?: Bitmap.createBitmap(
-                    width,
-                    height,
+                    safeWidth,
+                    safeHeight,
                     Bitmap.Config.ALPHA_8
                 )
             )
