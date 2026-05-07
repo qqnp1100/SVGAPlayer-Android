@@ -181,6 +181,10 @@ class SVGAParser(context: Context?) {
         suspend fun loadImage(imageView: ImageView, url: String, forKey: String): Bitmap?
     }
 
+    interface CustomDynamicImageLoadWithData : CustomDynamicImageLoad {
+        suspend fun loadImageData(imageView: ImageView, url: String, forKey: String): ByteArray?
+    }
+
     companion object {
         private const val TAG = "SVGAParser"
 
@@ -191,7 +195,7 @@ class SVGAParser(context: Context?) {
         var customDynamicImageLoad: CustomDynamicImageLoad? = null
         private var customBitmapDecoder: BitmapDecoder = object : BitmapDecoder {
             override fun onLoad(
-                view: View,
+                imageView: View,
                 path: String,
                 scaleX: Float,
                 scaleY: Float,
@@ -212,7 +216,7 @@ class SVGAParser(context: Context?) {
             }
 
             override fun onLoad(
-                view: View,
+                imageView: View,
                 byteArray: ByteArray,
                 scaleX: Float,
                 scaleY: Float,

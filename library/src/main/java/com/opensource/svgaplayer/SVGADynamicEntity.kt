@@ -7,7 +7,6 @@ import android.text.BoringLayout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.widget.ImageView
-import com.opensource.svgaplayer.utils.log.LogUtils
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -20,6 +19,9 @@ class SVGADynamicEntity {
 
     internal var dynamicInImage: HashMap<String, Bitmap> = hashMapOf()
     internal var dynamicOutImage: HashMap<String, Bitmap> = hashMapOf()
+
+    internal var dynamicInAnimatedImage: HashMap<String, SVGADynamicImage> = hashMapOf()
+    internal var dynamicOutAnimatedImage: HashMap<String, SVGADynamicImage> = hashMapOf()
 
     internal var dynamicOutImageKeyUrl = hashMapOf<String, String>()
 
@@ -55,6 +57,10 @@ class SVGADynamicEntity {
     }
 
     fun setDynamicImage(bitmap: Bitmap, forKey: String) {
+        this.isClean = false
+        this.dynamicInImage.remove(forKey)
+        this.dynamicInAnimatedImage.remove(forKey)
+        this.dynamicOutAnimatedImage.remove(forKey)
         this.dynamicOutImage.put(forKey, bitmap)
     }
 
@@ -62,7 +68,35 @@ class SVGADynamicEntity {
         return dynamicInImage[key] ?: dynamicOutImage[key]
     }
 
+    internal fun getDynamicAnimatedImage(key: String): SVGADynamicImage? {
+        return dynamicInAnimatedImage[key] ?: dynamicOutAnimatedImage[key]
+    }
+
+    fun setDynamicImage(data: ByteArray, forKey: String) {
+        this.isClean = false
+        this.dynamicInImage.remove(forKey)
+        this.dynamicOutImage.remove(forKey)
+        this.dynamicInAnimatedImage.remove(forKey)
+        this.dynamicOutAnimatedImage.remove(forKey)
+        SVGADynamicImage.decode(data)?.let {
+            this.dynamicOutAnimatedImage.put(forKey, it)
+            return
+        }
+        BitmapFactory.decodeByteArray(data, 0, data.size)?.let {
+            this.dynamicOutImage.put(forKey, it)
+        }
+    }
+
+    fun setDynamicGif(data: ByteArray, forKey: String) {
+        setDynamicImage(data, forKey)
+    }
+
+    fun setDynamicWebp(data: ByteArray, forKey: String) {
+        setDynamicImage(data, forKey)
+    }
+
     fun setDynamicImage(url: String, forKey: String) {
+        this.isClean = false
         dynamicOutImageKeyUrl[forKey] = url
     }
 
@@ -72,12 +106,26 @@ class SVGADynamicEntity {
         }
         isLoad = true
         if (SVGAParser.customDynamicImageLoad != null) {
+            val dynamicImageLoad = SVGAParser.customDynamicImageLoad ?: return
+            val dynamicImageDataLoad =
+                dynamicImageLoad as? SVGAParser.CustomDynamicImageLoadWithData
             for (entry in dynamicOutImageKeyUrl) {
                 if (isClean) {
                     return
                 }
-                SVGAParser.customDynamicImageLoad?.loadImage(imageView, entry.value, entry.key)
+                var hasDecodedImageData = false
+                dynamicImageDataLoad?.loadImageData(imageView, entry.value, entry.key)
+                    ?.let { data ->
+                        hasDecodedImageData = decodeDynamicImage(data, entry.key)
+                    }
+                if (hasDecodedImageData) {
+                    continue
+                }
+                dynamicImageLoad.loadImage(imageView, entry.value, entry.key)
                     ?.let {
+                        dynamicInImage.remove(entry.key)
+                        dynamicInAnimatedImage.remove(entry.key)
+                        dynamicOutAnimatedImage.remove(entry.key)
                         dynamicOutImage[entry.key] = it
                     }
             }
@@ -93,9 +141,8 @@ class SVGADynamicEntity {
                     it.requestMethod = "GET"
                     it.connect()
                     it.inputStream.use { stream ->
-                        BitmapFactory.decodeStream(stream)?.let {
-                            dynamicInImage[entry.key] = it
-                        }
+                        val data = stream.readBytes()
+                        decodeDynamicImage(data, entry.key)
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -108,6 +155,22 @@ class SVGADynamicEntity {
                 }
             }
         }
+    }
+
+    private fun decodeDynamicImage(data: ByteArray, key: String): Boolean {
+        SVGADynamicImage.decode(data)?.let {
+            dynamicInImage.remove(key)
+            dynamicOutImage.remove(key)
+            dynamicInAnimatedImage[key] = it
+            return true
+        }
+        BitmapFactory.decodeByteArray(data, 0, data.size)?.let {
+            dynamicInAnimatedImage.remove(key)
+            dynamicOutAnimatedImage.remove(key)
+            dynamicInImage[key] = it
+            return true
+        }
+        return false
     }
 
     /**
@@ -196,6 +259,15 @@ class SVGADynamicEntity {
         }
         this.dynamicInImage.clear()
         this.dynamicOutImage.clear()
+        this.dynamicInAnimatedImage.values.forEach {
+            it.clear()
+        }
+        this.dynamicOutAnimatedImage.values.forEach {
+            it.clear()
+        }
+        this.dynamicInAnimatedImage.clear()
+        this.dynamicOutAnimatedImage.clear()
+        this.dynamicOutImageKeyUrl.clear()
         this.dynamicText.clear()
         this.dynamicScrollTextSpeed.clear()
         this.dynamicTextPaint.clear()
