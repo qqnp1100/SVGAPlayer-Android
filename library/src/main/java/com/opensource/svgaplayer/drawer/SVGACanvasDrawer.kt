@@ -934,23 +934,77 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         val imageKey = sprite.imageKey ?: return
         dynamicItem.dynamicDrawer[imageKey]?.let {
             val frameMatrix = shareFrameMatrix(sprite.frameEntity.transform)
-            canvas.save()
-            canvas.concat(frameMatrix)
-            it.invoke(canvas, frameIndex)
-            canvas.restore()
+            val saveCount = canvas.save()
+            try {
+                canvas.concat(frameMatrix)
+                it.invoke(canvas, frameIndex)
+            } catch (error: OutOfMemoryError) {
+                LogUtils.error("SVGACanvasDrawer", error)
+            } catch (error: Exception) {
+                LogUtils.error("SVGACanvasDrawer", error)
+            } finally {
+                canvas.restoreToCount(saveCount)
+            }
         }
         dynamicItem.dynamicDrawerSized[imageKey]?.let {
+            val layoutWidth = sprite.frameEntity.layout.width
+            val layoutHeight = sprite.frameEntity.layout.height
+            if (!isSafeDynamicDrawerSize(layoutWidth, layoutHeight, canvas, imageKey)) {
+                return@let
+            }
             val frameMatrix = shareFrameMatrix(sprite.frameEntity.transform)
-            canvas.save()
-            canvas.concat(frameMatrix)
-            it.invoke(
-                canvas,
-                frameIndex,
-                sprite.frameEntity.layout.width.toInt(),
-                sprite.frameEntity.layout.height.toInt()
-            )
-            canvas.restore()
+            val saveCount = canvas.save()
+            try {
+                canvas.concat(frameMatrix)
+                it.invoke(
+                    canvas,
+                    frameIndex,
+                    layoutWidth.toInt(),
+                    layoutHeight.toInt()
+                )
+            } catch (error: OutOfMemoryError) {
+                LogUtils.error("SVGACanvasDrawer", error)
+            } catch (error: Exception) {
+                LogUtils.error("SVGACanvasDrawer", error)
+            } finally {
+                canvas.restoreToCount(saveCount)
+            }
         }
+    }
+
+    private fun isSafeDynamicDrawerSize(
+        width: Double,
+        height: Double,
+        canvas: Canvas,
+        imageKey: String
+    ): Boolean {
+        if (!java.lang.Double.isFinite(width) || !java.lang.Double.isFinite(height)) {
+            LogUtils.warn(msg = "Skip dynamic drawer $imageKey, non-finite size ${width}x${height}.")
+            return false
+        }
+        val intWidth = width.toInt()
+        val intHeight = height.toInt()
+        if (intWidth <= 0 || intHeight <= 0) {
+            LogUtils.warn(msg = "Skip dynamic drawer $imageKey, invalid size ${intWidth}x${intHeight}.")
+            return false
+        }
+        val maxCanvasWidth = canvas.maximumBitmapWidth
+            .takeIf { it > 0 }
+            ?: DEFAULT_MAX_TEMP_BITMAP_SIZE
+        val maxCanvasHeight = canvas.maximumBitmapHeight
+            .takeIf { it > 0 }
+            ?: DEFAULT_MAX_TEMP_BITMAP_SIZE
+        if (intWidth > maxCanvasWidth || intHeight > maxCanvasHeight) {
+            LogUtils.warn(
+                msg = "Skip dynamic drawer $imageKey, size ${intWidth}x${intHeight} exceeds canvas limit ${maxCanvasWidth}x${maxCanvasHeight}."
+            )
+            return false
+        }
+        if (intWidth.toLong() * intHeight.toLong() * bytesPerPixel(Bitmap.Config.ARGB_8888).toLong() > MAX_TEMP_BITMAP_BYTES) {
+            LogUtils.warn(msg = "Skip dynamic drawer $imageKey, size ${intWidth}x${intHeight} exceeds memory budget.")
+            return false
+        }
+        return true
     }
 
     class ShareValues {
