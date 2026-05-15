@@ -356,7 +356,10 @@ open class SVGAImageView @JvmOverloads constructor(
     private fun startLoadDynamicItemImage(dynamicItem: SVGADynamicEntity?) {
         dynamicItem ?: return
         scope?.launch {
-            dynamicItem.requestDynamicImage(this@SVGAImageView)
+            try {
+                dynamicItem.requestDynamicImage(this@SVGAImageView)
+            } catch (e: Exception) {
+            }
             launch(Dispatchers.Main) {
                 updateSvagDrawable()
             }

@@ -9,6 +9,7 @@ import android.text.TextPaint
 import android.widget.ImageView
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Created by cuiminghui on 2017/3/30.
@@ -17,13 +18,13 @@ class SVGADynamicEntity {
 
     internal var dynamicHidden: HashMap<String, Boolean> = hashMapOf()
 
-    internal var dynamicInImage: HashMap<String, Bitmap> = hashMapOf()
-    internal var dynamicOutImage: HashMap<String, Bitmap> = hashMapOf()
+    internal var dynamicInImage: MutableMap<String, Bitmap> = ConcurrentHashMap()
+    internal var dynamicOutImage: MutableMap<String, Bitmap> = ConcurrentHashMap()
 
-    internal var dynamicInAnimatedImage: HashMap<String, SVGADynamicImage> = hashMapOf()
-    internal var dynamicOutAnimatedImage: HashMap<String, SVGADynamicImage> = hashMapOf()
+    internal var dynamicInAnimatedImage: MutableMap<String, SVGADynamicImage> = ConcurrentHashMap()
+    internal var dynamicOutAnimatedImage: MutableMap<String, SVGADynamicImage> = ConcurrentHashMap()
 
-    internal var dynamicOutImageKeyUrl = hashMapOf<String, String>()
+    internal var dynamicOutImageKeyUrl: MutableMap<String, String> = ConcurrentHashMap()
 
     internal var dynamicText: HashMap<String, String> = hashMapOf()
     internal var dynamicScrollTextSpeed: HashMap<String, Float> = hashMapOf()
@@ -49,7 +50,9 @@ class SVGADynamicEntity {
 
 
     var srcollTextSpace = 10f
+    @Volatile
     private var isClean = false
+    @Volatile
     private var isLoad = false
 
     fun setHidden(value: Boolean, forKey: String) {
@@ -109,7 +112,7 @@ class SVGADynamicEntity {
             val dynamicImageLoad = SVGAParser.customDynamicImageLoad ?: return
             val dynamicImageDataLoad =
                 dynamicImageLoad as? SVGAParser.CustomDynamicImageLoadWithData
-            for (entry in dynamicOutImageKeyUrl) {
+            for (entry in dynamicOutImageKeyUrl.entries.toList()) {
                 if (isClean) {
                     return
                 }
@@ -123,6 +126,9 @@ class SVGADynamicEntity {
                 }
                 dynamicImageLoad.loadImage(imageView, entry.value, entry.key)
                     ?.let {
+                        if (isClean) {
+                            return
+                        }
                         dynamicInImage.remove(entry.key)
                         dynamicInAnimatedImage.remove(entry.key)
                         dynamicOutAnimatedImage.remove(entry.key)
@@ -131,7 +137,7 @@ class SVGADynamicEntity {
             }
             return
         }
-        for (entry in dynamicOutImageKeyUrl) {
+        for (entry in dynamicOutImageKeyUrl.entries.toList()) {
             if (isClean) {
                 return
             }
@@ -158,13 +164,22 @@ class SVGADynamicEntity {
     }
 
     private fun decodeDynamicImage(data: ByteArray, key: String): Boolean {
+        if (isClean) {
+            return false
+        }
         SVGADynamicImage.decode(data)?.let {
+            if (isClean) {
+                return false
+            }
             dynamicInImage.remove(key)
             dynamicOutImage.remove(key)
             dynamicInAnimatedImage[key] = it
             return true
         }
         BitmapFactory.decodeByteArray(data, 0, data.size)?.let {
+            if (isClean) {
+                return false
+            }
             dynamicInAnimatedImage.remove(key)
             dynamicOutAnimatedImage.remove(key)
             dynamicInImage[key] = it
