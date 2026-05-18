@@ -84,6 +84,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     private var scope: CloseableCoroutineScope? = null
+    private var pendingLoadDrawable: SVGADrawable? = null
     private var isViewVisible = true
     private var isRectVisible = true
     private var isAddOnPreDraw = false
@@ -230,7 +231,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     private fun onAnimatorUpdate(animator: ValueAnimator?) {
         val drawable = getSVGADrawable() ?: return
-        if (!isViewVisible && !isRectVisible && pauseWhenHide) {
+        if ((!isViewVisible || !isRectVisible) && pauseWhenHide) {
             drawable.updateCurrentFrame(animator?.animatedValue as Int, false)
         } else {
             drawable.updateCurrentFrame(animator?.animatedValue as Int)
@@ -293,6 +294,7 @@ open class SVGAImageView @JvmOverloads constructor(
         mAnimator?.cancel()
         mAnimator?.removeAllListeners()
         mAnimator?.removeAllUpdateListeners()
+        mAnimator = null
         getSVGADrawable()?.stop()
         getSVGADrawable()?.cleared = clear
     }
@@ -300,12 +302,13 @@ open class SVGAImageView @JvmOverloads constructor(
     override fun setImageDrawable(drawable: Drawable?) {
         super.setImageDrawable(drawable)
         if (drawable is SVGADrawable) {
-            drawable.videoItem.let {
-                startLoadVideoItemImage(it)
+            if (scope == null) {
+                pendingLoadDrawable = drawable
+            } else {
+                startLoadDrawable(drawable)
             }
-            drawable.dynamicItem.let {
-                startLoadDynamicItemImage(it)
-            }
+        } else {
+            pendingLoadDrawable = null
         }
     }
 
@@ -341,6 +344,12 @@ open class SVGAImageView @JvmOverloads constructor(
             return drawable
         }
         return null
+    }
+
+    private fun startLoadDrawable(drawable: SVGADrawable) {
+        pendingLoadDrawable = null
+        startLoadVideoItemImage(drawable.videoItem)
+        startLoadDynamicItemImage(drawable.dynamicItem)
     }
 
     private fun startLoadVideoItemImage(videoItem: SVGAVideoEntity) {
@@ -426,6 +435,9 @@ open class SVGAImageView @JvmOverloads constructor(
         scope?.close()
         scope = CloseableCoroutineScope(SupervisorJob() + SVGAParser.coroutineDispatcher)
         super.onAttachedToWindow()
+        (pendingLoadDrawable ?: getSVGADrawable())?.let {
+            startLoadDrawable(it)
+        }
         if (!isAddOnPreDraw) {
             viewTreeObserver.addOnPreDrawListener(this)
             isAddOnPreDraw = true
@@ -434,6 +446,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         scope?.close()
+        scope = null
         if (isAddOnPreDraw) {
             viewTreeObserver.removeOnPreDrawListener(this)
             isAddOnPreDraw = false

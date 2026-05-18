@@ -61,6 +61,10 @@ class SVGAVideoEntity {
     private lateinit var mCallback: () -> Unit
     private var imageJson: JSONObject? = null
     private var isClean = false
+    @Volatile
+    private var expectedAudioLoadCount = 0
+    @Volatile
+    private var audioPrepareCompleted = false
 
     private var isParser = false
 
@@ -138,6 +142,8 @@ class SVGAVideoEntity {
     internal fun prepare(callback: () -> Unit, playCallback: SVGAParser.PlayCallback?) {
         mCallback = callback
         mPlayCallback = playCallback
+        expectedAudioLoadCount = 0
+        audioPrepareCompleted = false
         if (movieItem == null) {
             mCallback()
         } else {
@@ -317,19 +323,27 @@ class SVGAVideoEntity {
 
     private fun setupAudios(entity: MovieEntity, completionBlock: () -> Unit) {
         if (entity.audios == null || entity.audios.isEmpty()) {
-            run(completionBlock)
+            completeAudioPrepare(completionBlock)
             return
         }
-        setupSoundPool(entity, completionBlock)
         val audiosFileMap = generateAudioFileMap(entity)
         //repair when audioEntity error can not callback
         //如果audiosFileMap为空 soundPool?.load 不会走 导致 setOnLoadCompleteListener 不会回调 导致外层prepare不回调卡住
         if (audiosFileMap.size == 0) {
-            run(completionBlock)
+            completeAudioPrepare(completionBlock)
             return
         }
+        mPlayCallback?.let {
+            it.onPlay(audiosFileMap.values.toList())
+            completeAudioPrepare(completionBlock)
+            return
+        }
+        setupSoundPool(entity, completionBlock)
         this.audioList = entity.audios.map { audio ->
             return@map createSvgaAudioEntity(audio, audiosFileMap)
+        }
+        if (expectedAudioLoadCount == 0) {
+            completeAudioPrepare(completionBlock)
         }
     }
 
@@ -344,17 +358,6 @@ class SVGAVideoEntity {
             // 除数不能为 0
             return item
         }
-        // 直接回调文件,后续播放都不走
-        mPlayCallback?.let {
-            val fileList: MutableList<File> = ArrayList()
-            audiosFileMap.forEach { entity ->
-                fileList.add(entity.value)
-            }
-            it.onPlay(fileList)
-            mCallback()
-            return item
-        }
-
         audiosFileMap[audio.audioKey]?.let { file ->
             FileInputStream(file).use {
                 val length = it.available().toDouble()
@@ -370,6 +373,9 @@ class SVGAVideoEntity {
                 } else {
                     item.soundID = soundPool?.load(it.fd, offset, length.toLong(), 1)
                 }
+                if ((item.soundID ?: -1) > 0) {
+                    expectedAudioLoadCount++
+                }
             }
         }
         return item
@@ -377,7 +383,9 @@ class SVGAVideoEntity {
 
     private fun generateAudioFile(audioCache: File, value: ByteArray): File {
         audioCache.createNewFile()
-        FileOutputStream(audioCache).write(value)
+        FileOutputStream(audioCache).use {
+            it.write(value)
+        }
         return audioCache
     }
 
@@ -425,8 +433,8 @@ class SVGAVideoEntity {
 
                 override fun onComplete() {
                     soundLoaded++
-                    if (soundLoaded >= entity.audios.count()) {
-                        completionBlock()
+                    if (soundLoaded >= expectedAudioLoadCount) {
+                        completeAudioPrepare(completionBlock)
                     }
                 }
             }
@@ -437,10 +445,18 @@ class SVGAVideoEntity {
         soundPool?.setOnLoadCompleteListener { _, _, _ ->
             LogUtils.info("SVGAParser", "pool_complete")
             soundLoaded++
-            if (soundLoaded >= entity.audios.count()) {
-                completionBlock()
+            if (soundLoaded >= expectedAudioLoadCount) {
+                completeAudioPrepare(completionBlock)
             }
         }
+    }
+
+    private fun completeAudioPrepare(completionBlock: () -> Unit) {
+        if (audioPrepareCompleted) {
+            return
+        }
+        audioPrepareCompleted = true
+        completionBlock()
     }
 
     private fun generateSoundPool(entity: MovieEntity): SoundPool? {

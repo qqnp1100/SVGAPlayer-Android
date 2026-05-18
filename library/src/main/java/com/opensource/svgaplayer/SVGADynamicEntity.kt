@@ -9,12 +9,18 @@ import android.text.TextPaint
 import android.widget.ImageView
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Created by cuiminghui on 2017/3/30.
  */
 class SVGADynamicEntity {
+    private companion object {
+        const val BUFFER_SIZE = 8 * 1024
+        const val MAX_DYNAMIC_IMAGE_BYTES = 32 * 1024 * 1024
+    }
 
     internal var dynamicHidden: HashMap<String, Boolean> = hashMapOf()
 
@@ -25,6 +31,7 @@ class SVGADynamicEntity {
     internal var dynamicOutAnimatedImage: MutableMap<String, SVGADynamicImage> = ConcurrentHashMap()
 
     internal var dynamicOutImageKeyUrl: MutableMap<String, String> = ConcurrentHashMap()
+    private val ownedBitmapKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     internal var dynamicText: HashMap<String, String> = hashMapOf()
     internal var dynamicScrollTextSpeed: HashMap<String, Float> = hashMapOf()
@@ -61,10 +68,7 @@ class SVGADynamicEntity {
 
     fun setDynamicImage(bitmap: Bitmap, forKey: String) {
         this.isClean = false
-        this.dynamicInImage.remove(forKey)
-        this.dynamicInAnimatedImage.remove(forKey)
-        this.dynamicOutAnimatedImage.remove(forKey)
-        this.dynamicOutImage.put(forKey, bitmap)
+        replaceBitmap(forKey, bitmap, dynamicOutImage, ownedByLibrary = false)
     }
 
     fun getDynamicImage(key: String): Bitmap? {
@@ -77,16 +81,14 @@ class SVGADynamicEntity {
 
     fun setDynamicImage(data: ByteArray, forKey: String) {
         this.isClean = false
-        this.dynamicInImage.remove(forKey)
-        this.dynamicOutImage.remove(forKey)
-        this.dynamicInAnimatedImage.remove(forKey)
-        this.dynamicOutAnimatedImage.remove(forKey)
         SVGADynamicImage.decode(data)?.let {
-            this.dynamicOutAnimatedImage.put(forKey, it)
+            clearBitmapForKey(forKey)
+            clearAnimatedImageForKey(forKey)
+            this.dynamicOutAnimatedImage[forKey] = it
             return
         }
         BitmapFactory.decodeByteArray(data, 0, data.size)?.let {
-            this.dynamicOutImage.put(forKey, it)
+            replaceBitmap(forKey, it, dynamicOutImage, ownedByLibrary = true)
         }
     }
 
@@ -129,10 +131,7 @@ class SVGADynamicEntity {
                         if (isClean) {
                             return
                         }
-                        dynamicInImage.remove(entry.key)
-                        dynamicInAnimatedImage.remove(entry.key)
-                        dynamicOutAnimatedImage.remove(entry.key)
-                        dynamicOutImage[entry.key] = it
+                        replaceBitmap(entry.key, it, dynamicOutImage, ownedByLibrary = false)
                     }
             }
             return
@@ -145,9 +144,10 @@ class SVGADynamicEntity {
                 try {
                     it.connectTimeout = 20 * 1000
                     it.requestMethod = "GET"
+                    it.readTimeout = 20 * 1000
                     it.connect()
                     it.inputStream.use { stream ->
-                        val data = stream.readBytes()
+                        val data = readDynamicImageBytes(stream)
                         decodeDynamicImage(data, entry.key)
                     }
                 } catch (e: Exception) {
@@ -171,8 +171,8 @@ class SVGADynamicEntity {
             if (isClean) {
                 return false
             }
-            dynamicInImage.remove(key)
-            dynamicOutImage.remove(key)
+            clearBitmapForKey(key)
+            clearAnimatedImageForKey(key)
             dynamicInAnimatedImage[key] = it
             return true
         }
@@ -180,12 +180,60 @@ class SVGADynamicEntity {
             if (isClean) {
                 return false
             }
-            dynamicInAnimatedImage.remove(key)
-            dynamicOutAnimatedImage.remove(key)
-            dynamicInImage[key] = it
+            replaceBitmap(key, it, dynamicInImage, ownedByLibrary = true)
             return true
         }
         return false
+    }
+
+    private fun replaceBitmap(
+        key: String,
+        bitmap: Bitmap,
+        target: MutableMap<String, Bitmap>,
+        ownedByLibrary: Boolean
+    ) {
+        clearBitmapForKey(key)
+        clearAnimatedImageForKey(key)
+        target[key] = bitmap
+        if (ownedByLibrary) {
+            ownedBitmapKeys.add(key)
+        } else {
+            ownedBitmapKeys.remove(key)
+        }
+    }
+
+    private fun clearBitmapForKey(key: String) {
+        if (ownedBitmapKeys.remove(key)) {
+            dynamicInImage[key]?.takeIf { !it.isRecycled }?.recycle()
+            dynamicOutImage[key]?.takeIf { !it.isRecycled }?.recycle()
+        }
+        dynamicInImage.remove(key)
+        dynamicOutImage.remove(key)
+    }
+
+    private fun clearAnimatedImageForKey(key: String) {
+        dynamicInAnimatedImage.remove(key)?.clear()
+        dynamicOutAnimatedImage.remove(key)?.clear()
+    }
+
+    private fun readDynamicImageBytes(inputStream: InputStream): ByteArray {
+        val outputStream = com.opensource.svgaplayer.utils.MyByteArrayOutputStream(BUFFER_SIZE)
+        outputStream.use {
+            val buffer = ByteArray(BUFFER_SIZE)
+            var totalBytes = 0
+            while (true) {
+                val count = inputStream.read(buffer)
+                if (count == -1) {
+                    break
+                }
+                totalBytes += count
+                if (totalBytes > MAX_DYNAMIC_IMAGE_BYTES) {
+                    throw IOException("Dynamic image exceeds $MAX_DYNAMIC_IMAGE_BYTES bytes.")
+                }
+                it.write(buffer, 0, count)
+            }
+            return it.toUnSafeByteArray()
+        }
     }
 
     /**
@@ -269,9 +317,10 @@ class SVGADynamicEntity {
         this.isClean = true
         this.isTextDirty = true
         this.dynamicHidden.clear()
-        dynamicInImage.map {
-            it.value.recycle()
+        ownedBitmapKeys.toList().forEach {
+            clearBitmapForKey(it)
         }
+        ownedBitmapKeys.clear()
         this.dynamicInImage.clear()
         this.dynamicOutImage.clear()
         this.dynamicInAnimatedImage.values.forEach {

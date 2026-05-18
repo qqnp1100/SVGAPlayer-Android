@@ -11,6 +11,7 @@ import android.media.SoundPool
 import android.os.Build
 import com.opensource.svgaplayer.utils.log.LogUtils
 import java.io.FileDescriptor
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Author : llk
@@ -29,7 +30,7 @@ object SVGASoundManager {
 
     private var soundPool: SoundPool? = null
 
-    private val soundCallBackMap: MutableMap<Int, SVGASoundCallBack> = mutableMapOf()
+    private val soundCallBackMap: MutableMap<Int, SVGASoundCallBack> = ConcurrentHashMap()
 
     /**
      * 音量设置，范围在 [0, 1] 之间
@@ -60,10 +61,11 @@ object SVGASoundManager {
         soundPool = getSoundPool(maxStreams)
         soundPool?.setOnLoadCompleteListener { _, soundId, status ->
             LogUtils.debug(TAG, "SoundPool onLoadComplete soundId=$soundId status=$status")
-            if (status == 0) { //加载该声音成功
-                if (soundCallBackMap.containsKey(soundId)) {
-                    soundCallBackMap[soundId]?.onComplete()
-                }
+            if (status != 0) {
+                LogUtils.error(TAG, "SoundPool load failed, soundId=$soundId status=$status")
+            }
+            if (soundCallBackMap.containsKey(soundId)) {
+                soundCallBackMap[soundId]?.onComplete()
             }
         }
     }
@@ -73,6 +75,8 @@ object SVGASoundManager {
         if (soundCallBackMap.isNotEmpty()) {
             soundCallBackMap.clear()
         }
+        soundPool?.release()
+        soundPool = null
     }
 
     /**

@@ -22,6 +22,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
     companion object {
         private const val DEFAULT_MAX_TEMP_BITMAP_SIZE = 32766
         private const val MAX_TEMP_BITMAP_BYTES = 64L * 1024L * 1024L
+        private const val MAX_TEXT_BITMAP_CACHE_BYTES = 16L * 1024L * 1024L
     }
 
     private val sharedValues = ShareValues()
@@ -29,6 +30,9 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
     private val drawTextGradientCache: HashMap<String, Bitmap> = hashMapOf()
     private val scrollTextPosition: HashMap<String, Float> = hashMapOf()
     private val pathCache = PathCache()
+    private val matteSprites: HashMap<String, SVGADrawerSprite> = hashMapOf()
+    private val matrixValues = FloatArray(9)
+    private val clickMatrixValues = FloatArray(9)
 
     private var beginIndexList: Array<Boolean>? = null
     private var endIndexList: Array<Boolean>? = null
@@ -51,7 +55,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         val sprites = requestFrameSprites(frameIndex)
         // Filter null sprites
         if (sprites.count() <= 0) return
-        val matteSprites = mutableMapOf<String, SVGADrawerSprite>()
+        matteSprites.clear()
         var saveID = -1
         beginIndexList = null
         endIndexList = null
@@ -240,7 +244,6 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         if (canvas.width <= 0 || drawingBitmapHeight <= 0) {
             return 0
         }
-        val matrixValues = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
         frameMatrix.getValues(matrixValues)
         val requestedWidth = textWidth.toDouble() +
             dynamicItem.srcollTextSpace.toDouble() *
@@ -285,9 +288,70 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
     }
 
     private fun clearTextBitmapCaches() {
+        this.drawTextCache.values.forEach { bitmap ->
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
+        this.drawTextGradientCache.values.forEach { bitmap ->
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
         this.drawTextCache.clear()
         this.drawTextGradientCache.clear()
         this.scrollTextPosition.clear()
+    }
+
+    fun clearCaches() {
+        clearTextBitmapCaches()
+        this.pathCache.clear()
+        this.sharedValues.clear()
+    }
+
+    private fun cacheTextBitmap(cacheKey: String, bitmap: Bitmap) {
+        drawTextCache.put(cacheKey, bitmap)?.let {
+            if (it !== bitmap && !it.isRecycled) {
+                it.recycle()
+            }
+        }
+        trimTextBitmapCache(drawTextCache, bitmap)
+    }
+
+    private fun cacheGradientBitmap(cacheKey: String, bitmap: Bitmap) {
+        drawTextGradientCache.put(cacheKey, bitmap)?.let {
+            if (it !== bitmap && !it.isRecycled) {
+                it.recycle()
+            }
+        }
+        trimTextBitmapCache(drawTextGradientCache, bitmap)
+    }
+
+    private fun trimTextBitmapCache(cache: HashMap<String, Bitmap>, protectedBitmap: Bitmap) {
+        var totalBytes = cache.values.sumOf { bitmapByteCount(it) }
+        if (totalBytes <= MAX_TEXT_BITMAP_CACHE_BYTES) {
+            return
+        }
+        val iterator = cache.entries.iterator()
+        while (iterator.hasNext() && totalBytes > MAX_TEXT_BITMAP_CACHE_BYTES) {
+            val entry = iterator.next()
+            if (entry.value === protectedBitmap) {
+                continue
+            }
+            totalBytes -= bitmapByteCount(entry.value)
+            if (!entry.value.isRecycled) {
+                entry.value.recycle()
+            }
+            iterator.remove()
+        }
+    }
+
+    private fun bitmapByteCount(bitmap: Bitmap): Long {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            bitmap.allocationByteCount.toLong()
+        } else {
+            bitmap.byteCount.toLong()
+        }
     }
 
     private fun mappedXScale(matrixValues: FloatArray): Float {
@@ -385,14 +449,13 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             )
             dynamicItem.dynamicIClickArea.let {
                 it.get(imageKey)?.let { listener ->
-                    val matrixArray = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
-                    frameMatrix.getValues(matrixArray)
+                    frameMatrix.getValues(clickMatrixValues)
                     listener.onResponseArea(
                         imageKey,
-                        matrixArray[2].toInt(),
-                        matrixArray[5].toInt(),
-                        (layoutWidth * matrixArray[0] + matrixArray[2]).toInt(),
-                        (layoutHeight * matrixArray[4] + matrixArray[5]).toInt()
+                        clickMatrixValues[2].toInt(),
+                        clickMatrixValues[5].toInt(),
+                        (layoutWidth * clickMatrixValues[0] + clickMatrixValues[2]).toInt(),
+                        (layoutHeight * clickMatrixValues[4] + clickMatrixValues[5]).toInt()
                     )
                 }
             }
@@ -425,14 +488,13 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         }
         dynamicItem.dynamicIClickArea.let {
             it.get(imageKey)?.let { listener ->
-                val matrixArray = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
-                frameMatrix.getValues(matrixArray)
+                frameMatrix.getValues(clickMatrixValues)
                 listener.onResponseArea(
                     imageKey,
-                    matrixArray[2].toInt(),
-                    matrixArray[5].toInt(),
-                    (imageWidth * matrixArray[0] + matrixArray[2]).toInt(),
-                    (imageHeight * matrixArray[4] + matrixArray[5]).toInt()
+                    clickMatrixValues[2].toInt(),
+                    clickMatrixValues[5].toInt(),
+                    (imageWidth * clickMatrixValues[0] + clickMatrixValues[2]).toInt(),
+                    (imageHeight * clickMatrixValues[4] + clickMatrixValues[5]).toInt()
                 )
             }
         }
@@ -532,7 +594,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                                 baseLineY,
                                 drawingTextPaint
                             );
-                            drawTextCache.put(imageKey, this)
+                            cacheTextBitmap(imageKey, this)
                         }
                     }
                     if (restoreTextAlign) {
@@ -574,7 +636,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                         val textCanvas = Canvas(this)
                         textCanvas.translate(0f, ((drawingBitmapHeight - it.height) / 2).toFloat())
                         it.draw(textCanvas)
-                        drawTextCache.put(imageKey, this)
+                        cacheTextBitmap(imageKey, this)
                     }
                 }
                 if (restoreTextAlign) {
@@ -656,7 +718,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                         val textCanvas = Canvas(this)
                         textCanvas.translate(0f, ((drawingBitmapHeight - layout.height) / 2).toFloat())
                         layout.draw(textCanvas)
-                        drawTextCache.put(imageKey, this)
+                        cacheTextBitmap(imageKey, this)
                     }
                 }
                 if (restoreTextAlign) {
@@ -745,7 +807,6 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         if (cycleWidth <= 0f) {
             return 0f
         }
-        val matrixValues = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
         frameMatrix.getValues(matrixValues)
         val speed = (
             (dynamicItem.dynamicScrollTextSpeed[imageKey] ?: 10f) *
@@ -799,7 +860,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 )
                 val gradientCanvas = Canvas(this)
                 gradientCanvas.drawPaint(maskPaint)
-                drawTextGradientCache[cacheKey] = this
+                cacheGradientBitmap(cacheKey, this)
             }
         }
     }
@@ -1097,6 +1158,16 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             shareMatteCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
             return shareMatteCanvas
         }
+
+        fun clear() {
+            sharedMatteBitmap?.let {
+                if (!it.isRecycled) {
+                    it.recycle()
+                }
+            }
+            sharedMatteBitmap = null
+            shareMatteCanvas = null
+        }
     }
 
     class PathCache {
@@ -1120,6 +1191,10 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 this.cache[shape] = path
             }
             return this.cache[shape]!!
+        }
+
+        fun clear() {
+            this.cache.clear()
         }
 
     }

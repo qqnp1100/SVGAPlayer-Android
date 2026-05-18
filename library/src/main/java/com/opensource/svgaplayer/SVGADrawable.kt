@@ -96,6 +96,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     }
 
     fun clear() {
+        drawer.clearCaches()
         videoItem.audioList.forEach { audio ->
             audio.playIDs?.map {
                 if (SVGASoundManager.isInit()) {
