@@ -85,6 +85,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     private var scope: CloseableCoroutineScope? = null
     private var pendingLoadDrawable: SVGADrawable? = null
+    private var isStaticVideoItem = false
     private var isViewVisible = true
     private var isRectVisible = true
     private var isAddOnPreDraw = false
@@ -197,6 +198,8 @@ open class SVGAImageView @JvmOverloads constructor(
         val drawable = getSVGADrawable() ?: return
         drawable.cleared = false
         drawable.scaleType = scaleType
+        isStaticVideoItem = false
+        drawable.setTextScrollEnabled(true)
     }
 
     private fun getSVGADrawable(): SVGADrawable? {
@@ -296,12 +299,16 @@ open class SVGAImageView @JvmOverloads constructor(
         mAnimator?.removeAllUpdateListeners()
         mAnimator = null
         getSVGADrawable()?.stop()
+        getSVGADrawable()?.setTextScrollEnabled(false)
         getSVGADrawable()?.cleared = clear
     }
 
     override fun setImageDrawable(drawable: Drawable?) {
+        getSVGADrawable()?.setTextScrollEnabled(false)
+        isStaticVideoItem = false
         super.setImageDrawable(drawable)
         if (drawable is SVGADrawable) {
+            drawable.setTextScrollAttached(isAttachedToWindow)
             if (scope == null) {
                 pendingLoadDrawable = drawable
             } else {
@@ -340,7 +347,9 @@ open class SVGAImageView @JvmOverloads constructor(
         } else {
             val drawable = SVGADrawable(videoItem, dynamicItem ?: SVGADynamicEntity())
             drawable.cleared = false
+            drawable.setTextScrollEnabled(true)
             setImageDrawable(drawable)
+            isStaticVideoItem = true
             return drawable
         }
         return null
@@ -435,6 +444,7 @@ open class SVGAImageView @JvmOverloads constructor(
         scope?.close()
         scope = CloseableCoroutineScope(SupervisorJob() + SVGAParser.coroutineDispatcher)
         super.onAttachedToWindow()
+        getSVGADrawable()?.setTextScrollAttached(true)
         (pendingLoadDrawable ?: getSVGADrawable())?.let {
             startLoadDrawable(it)
         }
@@ -451,9 +461,15 @@ open class SVGAImageView @JvmOverloads constructor(
             viewTreeObserver.removeOnPreDrawListener(this)
             isAddOnPreDraw = false
         }
+        val drawable = getSVGADrawable()
+        drawable?.setTextScrollAttached(false)
         super.onDetachedFromWindow()
         removeCallbacks(updateSvagDrawableCallBack)
-        stopAnimation(clearsAfterDetached)
+        if (isStaticVideoItem && !clearsAfterDetached) {
+            drawable?.stop()
+        } else {
+            stopAnimation(clearsAfterDetached)
+        }
         parserImagesEndCallBack = null
         if (clearsAfterDetached) {
             clear()

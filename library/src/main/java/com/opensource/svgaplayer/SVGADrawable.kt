@@ -4,6 +4,7 @@ import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
+import android.os.SystemClock
 import android.widget.ImageView
 import com.opensource.svgaplayer.drawer.SVGACanvasDrawer
 
@@ -18,6 +19,10 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
                 return
             }
             field = value
+            if (value) {
+                textScrollTicker.stop()
+                drawer.pauseTextScrolling()
+            }
             invalidateSelf()
         }
 
@@ -27,6 +32,14 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     var scaleType: ImageView.ScaleType = ImageView.ScaleType.MATRIX
 
     private val drawer = SVGACanvasDrawer(videoItem, dynamicItem)
+    private var textScrollAttached = true
+    private var textScrollVisible = true
+    private val textScrollTicker = TextScrollTicker(
+        nowUptimeMillis = SystemClock::uptimeMillis,
+        schedule = { runnable, deadline -> scheduleSelf(runnable, deadline) },
+        unschedule = { runnable -> unscheduleSelf(runnable) },
+        invalidate = { invalidateSelf() },
+    )
 
     fun updateCurrentFrame(frame: Int, invalidate: Boolean = true) {
         if (currentFrame == frame) {
@@ -40,11 +53,43 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     override fun draw(canvas: Canvas) {
         if (cleared) {
+            textScrollTicker.onDraw(false)
             return
         }
-        canvas?.let {
-            drawer.drawFrame(it, currentFrame, scaleType)
+        drawer.drawFrame(canvas, currentFrame, scaleType)
+        textScrollTicker.onDraw(drawer.hasActiveScrollingText)
+    }
+
+    internal fun setTextScrollEnabled(enabled: Boolean) {
+        drawer.pauseTextScrolling()
+        if (enabled && !cleared) {
+            textScrollTicker.setEnabled(true)
+        } else {
+            textScrollTicker.stop()
         }
+    }
+
+    internal fun setTextScrollAttached(attached: Boolean) {
+        textScrollAttached = attached
+        if (!attached) {
+            drawer.pauseTextScrolling()
+        }
+        updateTextScrollHostActive()
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun setVisible(visible: Boolean, restart: Boolean): Boolean {
+        val changed = super.setVisible(visible, restart)
+        textScrollVisible = visible
+        if (!visible) {
+            drawer.pauseTextScrolling()
+        }
+        updateTextScrollHostActive()
+        return changed
+    }
+
+    private fun updateTextScrollHostActive() {
+        textScrollTicker.setHostActive(textScrollAttached && textScrollVisible)
     }
 
     override fun setAlpha(alpha: Int) {
@@ -96,6 +141,8 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     }
 
     fun clear() {
+        textScrollTicker.stop()
+        drawer.pauseTextScrolling()
         drawer.clearCaches()
         videoItem.audioList.forEach { audio ->
             audio.playIDs?.map {
