@@ -306,6 +306,7 @@ open class SVGAImageView @JvmOverloads constructor(
     override fun setImageDrawable(drawable: Drawable?) {
         getSVGADrawable()?.setTextScrollEnabled(false)
         isStaticVideoItem = false
+        (drawable as? SVGADrawable)?.setTextScrollAttached(false)
         super.setImageDrawable(drawable)
         if (drawable is SVGADrawable) {
             drawable.setTextScrollAttached(isAttachedToWindow)
