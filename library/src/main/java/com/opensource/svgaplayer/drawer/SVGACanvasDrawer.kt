@@ -19,6 +19,13 @@ import com.opensource.svgaplayer.utils.log.LogUtils
 internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicEntity) :
     SGVADrawer(videoItem) {
 
+    private data class ScrollingTextShader(
+        val bitmap: Bitmap,
+        val viewportWidth: Int,
+        val bitmapShader: BitmapShader,
+        val composedShader: ComposeShader,
+    )
+
     companion object {
         private const val DEFAULT_MAX_TEMP_BITMAP_SIZE = 32766
         private const val MAX_TEMP_BITMAP_BYTES = 64L * 1024L * 1024L
@@ -27,8 +34,9 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
 
     private val sharedValues = ShareValues()
     private val drawTextCache: HashMap<String, Bitmap> = hashMapOf()
-    private val drawTextGradientCache: HashMap<String, Bitmap> = hashMapOf()
-    private val scrollTextPosition: HashMap<String, Float> = hashMapOf()
+    private val scrollingTextShaders = HashMap<String, ScrollingTextShader>()
+    private val scrollTimeline = TextScrollTimeline()
+    private val frameChangeGate = FrameChangeGate()
     private val pathCache = PathCache()
     private val matteSprites: HashMap<String, SVGADrawerSprite> = hashMapOf()
     private val matrixValues = FloatArray(9)
@@ -39,13 +47,21 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
     private var mySoundId: Int? = null
     private var textCacheCanvasWidth: Int = 0
     private var textCacheCanvasHeight: Int = 0
+    private var frameTimeNanos = 0L
+
+    var hasActiveScrollingText = false
+        private set
 
     override fun drawFrame(canvas: Canvas, frameIndex: Int, scaleType: ImageView.ScaleType) {
+        hasActiveScrollingText = false
         if (canvas.width <= 0 || canvas.height <= 0) {
             return
         }
+        frameTimeNanos = System.nanoTime()
         super.drawFrame(canvas, frameIndex, scaleType)
-        playAudio(frameIndex)
+        if (frameChangeGate.shouldProcess(frameIndex)) {
+            playAudio(frameIndex)
+        }
         if (textCacheCanvasWidth != canvas.width || textCacheCanvasHeight != canvas.height) {
             clearTextBitmapCaches()
             textCacheCanvasWidth = canvas.width
@@ -288,43 +304,40 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
     }
 
     private fun clearTextBitmapCaches() {
+        this.scrollingTextShaders.clear()
+        this.scrollTimeline.clear()
         this.drawTextCache.values.forEach { bitmap ->
             if (!bitmap.isRecycled) {
                 bitmap.recycle()
             }
         }
-        this.drawTextGradientCache.values.forEach { bitmap ->
-            if (!bitmap.isRecycled) {
-                bitmap.recycle()
-            }
-        }
         this.drawTextCache.clear()
-        this.drawTextGradientCache.clear()
-        this.scrollTextPosition.clear()
     }
 
     fun clearCaches() {
         clearTextBitmapCaches()
+        this.frameChangeGate.clear()
         this.pathCache.clear()
         this.sharedValues.clear()
+    }
+
+    fun pauseTextScrolling() {
+        hasActiveScrollingText = false
+        scrollTimeline.pause()
     }
 
     private fun cacheTextBitmap(cacheKey: String, bitmap: Bitmap) {
         drawTextCache.put(cacheKey, bitmap)?.let {
             if (it !== bitmap && !it.isRecycled) {
+                discardScrollingTextShader(it)
                 it.recycle()
             }
         }
         trimTextBitmapCache(drawTextCache, bitmap)
     }
 
-    private fun cacheGradientBitmap(cacheKey: String, bitmap: Bitmap) {
-        drawTextGradientCache.put(cacheKey, bitmap)?.let {
-            if (it !== bitmap && !it.isRecycled) {
-                it.recycle()
-            }
-        }
-        trimTextBitmapCache(drawTextGradientCache, bitmap)
+    private fun discardScrollingTextShader(bitmap: Bitmap) {
+        scrollingTextShaders.entries.removeAll { it.value.bitmap === bitmap }
     }
 
     private fun trimTextBitmapCache(cache: HashMap<String, Bitmap>, protectedBitmap: Bitmap) {
@@ -340,6 +353,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             }
             totalBytes -= bitmapByteCount(entry.value)
             if (!entry.value.isRecycled) {
+                discardScrollingTextShader(entry.value)
                 entry.value.recycle()
             }
             iterator.remove()
@@ -740,7 +754,8 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 maskPath.buildPath(path)
                 canvas.clipPath(path)
             }
-            if (textBitmap.width > drawingBitmapWidth && scrollSpeed > 0f) {
+            if (TextScrollTimeline.isActive(textBitmap.width, drawingBitmapWidth, scrollSpeed)) {
+                hasActiveScrollingText = true
                 drawScrollingTextBitmap(
                     canvas,
                     imageKey,
@@ -748,7 +763,8 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                     drawingBitmapWidth,
                     drawingBitmapHeight,
                     frameMatrix,
-                    paint
+                    paint,
+                    scrollSpeed,
                 )
             } else {
                 canvas.drawBitmap(textBitmap, 0f, 0f, paint)
@@ -764,105 +780,66 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         drawingBitmapWidth: Int,
         drawingBitmapHeight: Int,
         frameMatrix: Matrix,
-        paint: Paint
+        paint: Paint,
+        configuredSpeed: Float,
     ) {
-        val offset = nextScrollTextOffset(
-            canvas,
+        frameMatrix.getValues(matrixValues)
+        val pixelsPerSecond = configuredSpeed *
+            videoItem.videoSize.width.toFloat() *
+            mappedXScale(matrixValues) /
+            canvas.width.toFloat()
+        val offset = scrollTimeline.offsetFor(
             imageKey,
             textBitmap.width.toFloat(),
-            frameMatrix
+            pixelsPerSecond,
+            frameTimeNanos,
         )
-        val saveLayer = canvas.saveLayer(
+        val shader = scrollingTextShader(imageKey, textBitmap, drawingBitmapWidth)
+        val shaderMatrix = sharedValues.sharedMatrix3()
+        shaderMatrix.setTranslate(-offset, 0f)
+        shader.bitmapShader.setLocalMatrix(shaderMatrix)
+        paint.shader = shader.composedShader
+        canvas.drawRect(
             0f,
             0f,
             drawingBitmapWidth.toFloat(),
             drawingBitmapHeight.toFloat(),
-            null
+            paint,
         )
-        var drawX = -offset
-        while (drawX < drawingBitmapWidth) {
-            canvas.drawBitmap(textBitmap, drawX, 0f, paint)
-            drawX += textBitmap.width
-        }
-        val gradientBitmap = scrollTextGradientBitmap(
-            canvas,
-            imageKey,
-            drawingBitmapWidth,
-            drawingBitmapHeight
-        )
-        if (gradientBitmap != null) {
-            val maskPaint = this.sharedValues.sharedPaint2()
-            maskPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
-            canvas.drawBitmap(gradientBitmap, 0f, 0f, maskPaint)
-        }
-        canvas.restoreToCount(saveLayer)
+        paint.shader = null
     }
 
-    private fun nextScrollTextOffset(
-        canvas: Canvas,
+    private fun scrollingTextShader(
         imageKey: String,
-        cycleWidth: Float,
-        frameMatrix: Matrix
-    ): Float {
-        if (cycleWidth <= 0f) {
-            return 0f
-        }
-        frameMatrix.getValues(matrixValues)
-        val speed = (
-            (dynamicItem.dynamicScrollTextSpeed[imageKey] ?: 10f) *
-                videoItem.videoSize.width.toFloat() *
-                mappedXScale(matrixValues) /
-                canvas.width.toFloat() /
-                videoItem.FPS.coerceAtLeast(1)
-            )
-        if (!java.lang.Float.isFinite(speed) || speed <= 0f) {
-            return scrollTextPosition[imageKey] ?: 0f
-        }
-        var offset = (scrollTextPosition[imageKey] ?: 0f) + speed
-        offset %= cycleWidth
-        if (offset < 0f) {
-            offset += cycleWidth
-        }
-        scrollTextPosition[imageKey] = offset
-        return offset
-    }
-
-    private fun scrollTextGradientBitmap(
-        canvas: Canvas,
-        imageKey: String,
+        textBitmap: Bitmap,
         drawingBitmapWidth: Int,
-        drawingBitmapHeight: Int
-    ): Bitmap? {
-        val cacheKey = "$imageKey:$drawingBitmapWidth:$drawingBitmapHeight"
-        return drawTextGradientCache[cacheKey] ?: kotlin.run {
-            createTempBitmap(
-                drawingBitmapWidth,
-                drawingBitmapHeight,
-                Bitmap.Config.ARGB_8888,
-                canvas,
-                "text gradient"
-            )?.apply {
-                val fadeRatio = (24f / drawingBitmapWidth.toFloat()).coerceIn(0.08f, 0.18f)
-                val maskPaint = Paint()
-                maskPaint.shader = LinearGradient(
-                    0f,
-                    0f,
-                    drawingBitmapWidth.toFloat(),
-                    0f,
-                    intArrayOf(
-                        Color.TRANSPARENT,
-                        Color.BLACK,
-                        Color.BLACK,
-                        Color.TRANSPARENT
-                    ),
-                    floatArrayOf(0.0f, fadeRatio, 1f - fadeRatio, 1f),
-                    Shader.TileMode.CLAMP
-                )
-                val gradientCanvas = Canvas(this)
-                gradientCanvas.drawPaint(maskPaint)
-                cacheGradientBitmap(cacheKey, this)
+    ): ScrollingTextShader {
+        scrollingTextShaders[imageKey]?.let {
+            if (it.bitmap === textBitmap && it.viewportWidth == drawingBitmapWidth) {
+                return it
             }
         }
+        val bitmapShader = BitmapShader(
+            textBitmap,
+            Shader.TileMode.REPEAT,
+            Shader.TileMode.CLAMP,
+        )
+        val fadeRatio = (24f / drawingBitmapWidth.toFloat()).coerceIn(0.08f, 0.18f)
+        val fadeShader = LinearGradient(
+            0f,
+            0f,
+            drawingBitmapWidth.toFloat(),
+            0f,
+            intArrayOf(Color.TRANSPARENT, Color.BLACK, Color.BLACK, Color.TRANSPARENT),
+            floatArrayOf(0f, fadeRatio, 1f - fadeRatio, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        return ScrollingTextShader(
+            textBitmap,
+            drawingBitmapWidth,
+            bitmapShader,
+            ComposeShader(bitmapShader, fadeShader, PorterDuff.Mode.DST_IN),
+        ).also { scrollingTextShaders[imageKey] = it }
     }
 
     private fun drawShape(sprite: SVGADrawerSprite, canvas: Canvas) {
@@ -1071,11 +1048,11 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
     class ShareValues {
 
         private val sharedPaint = Paint()
-        private val sharedPaint2 = Paint()
         private val sharedPath = Path()
         private val sharedPath2 = Path()
         private val sharedMatrix = Matrix()
         private val sharedMatrix2 = Matrix()
+        private val sharedMatrix3 = Matrix()
 
         private val shareMattePaint = Paint()
         private var shareMatteCanvas: Canvas? = null
@@ -1084,11 +1061,6 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         fun sharedPaint(): Paint {
             sharedPaint.reset()
             return sharedPaint
-        }
-
-        fun sharedPaint2(): Paint {
-            sharedPaint2.reset()
-            return sharedPaint2
         }
 
         fun sharedPath(): Path {
@@ -1109,6 +1081,11 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         fun sharedMatrix2(): Matrix {
             sharedMatrix2.reset()
             return sharedMatrix2
+        }
+
+        fun sharedMatrix3(): Matrix {
+            sharedMatrix3.reset()
+            return sharedMatrix3
         }
 
         fun shareMattePaint(): Paint {
