@@ -51,7 +51,9 @@ After a draw, `SVGACanvasDrawer` reports whether at least one visible text layer
 
 The ticker invalidates only the drawable. It never changes `currentFrame`. If a later draw finds no active scrolling text, the pending ticker callback is cancelled.
 
-For a static item, scrolling is enabled immediately. For an animated item, `setupDrawable()` enables it when playback begins. Manual pause or stop disables the ticker and resets only timing anchors. Resume enables it again and retains offsets. Detach suspends scheduling while preserving the desired enabled state so attachment can resume static or playing text without a time jump.
+For a static item, scrolling is enabled immediately. For an animated item, `setupDrawable()` enables it when playback begins. Manual pause or stop disables the ticker and resets only timing anchors. Resume enables it again and retains offsets. Detach suspends scheduling without losing a static item's enabled state, so attachment can resume static text without a time jump. Animated text resumes only when SVGA playback is started again.
+
+`SVGACanvasDrawer` processes audio only when the requested SVGA frame index differs from the last drawn frame index. The 60 FPS ticker redraws the same frame, so text-only invalidations cannot repeatedly trigger frame audio.
 
 ## Carousel Rendering
 
