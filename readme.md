@@ -1,4 +1,5 @@
 # 本分支修改内容（基于2.6.1版本修改）
+- 28以上用ImageDecoder解析图片
 - SVGADynamicEntity 支持填充gif/webp动图
 - SVGAVideoEntity 改为边播放边加载，实现类似渐进加载的效果（注：imageMapSize就是可变的了）
 - SvgaImageView 增加不可见时停止绘制功能
