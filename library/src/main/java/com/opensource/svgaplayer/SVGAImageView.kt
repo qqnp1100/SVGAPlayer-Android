@@ -7,6 +7,7 @@ import android.content.Context
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.os.Build
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
 import android.view.MotionEvent
@@ -90,7 +91,8 @@ open class SVGAImageView @JvmOverloads constructor(
     private var isRectVisible = true
     private var isAddOnPreDraw = false
     var pauseWhenHide = true
-    private var visibleRect: Rect = Rect()
+    private val visibleRect = Rect()
+    private var lastRectVisibleCheckUptimeMillis = 0L
 
     init {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR2) {
@@ -247,11 +249,25 @@ open class SVGAImageView @JvmOverloads constructor(
     override fun onVisibilityAggregated(isVisible: Boolean) {
         super.onVisibilityAggregated(isVisible)
         this.isViewVisible = isVisible
+        if (isVisible) {
+            lastRectVisibleCheckUptimeMillis = 0L
+        }
     }
 
     override fun onPreDraw(): Boolean {
-        isRectVisible = getGlobalVisibleRect(visibleRect)
+        updateRectVisible()
         return true
+    }
+
+    private fun updateRectVisible(force: Boolean = false) {
+        if (!pauseWhenHide || !isViewVisible || !isAnimating) return
+
+        val now = SystemClock.uptimeMillis()
+        if (!force && now - lastRectVisibleCheckUptimeMillis < RECT_VISIBLE_CHECK_INTERVAL_MILLIS) {
+            return
+        }
+        isRectVisible = getGlobalVisibleRect(visibleRect)
+        lastRectVisibleCheckUptimeMillis = now
     }
 
 
@@ -494,7 +510,10 @@ open class SVGAImageView @JvmOverloads constructor(
         }
 
         override fun onAnimationStart(animation: Animator) {
-            weakReference.get()?.isAnimating = true
+            weakReference.get()?.run {
+                isAnimating = true
+                updateRectVisible(force = true)
+            }
         }
     } // end of AnimatorListener
 
@@ -507,4 +526,8 @@ open class SVGAImageView @JvmOverloads constructor(
             weakReference.get()?.onAnimatorUpdate(animation)
         }
     } // end of AnimatorUpdateListener
+
+    private companion object {
+        const val RECT_VISIBLE_CHECK_INTERVAL_MILLIS = 100L
+    }
 }
