@@ -1,0 +1,252 @@
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/D:/LIbs/java/gradle/wrapper/dists/gradle-8.14.2-bin/2pb3mgt1p815evrl3weanttgr/gradle-8.14.2/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+> Task :svga-coil3:preBuild UP-TO-DATE
+> Task :svga-coil3:preReleaseBuild UP-TO-DATE
+> Task :svga-coil3:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :svga-coil3:mergeReleaseNativeLibs NO-SOURCE
+> Task :svga-coil3:stripReleaseDebugSymbols NO-SOURCE
+> Task :svga-coil3:copyReleaseJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :svga-coil3:generateReleaseResValues UP-TO-DATE
+> Task :svga-coil3:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :library:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :library:preBuild UP-TO-DATE
+> Task :library:preReleaseBuild UP-TO-DATE
+> Task :library:generateReleaseResValues UP-TO-DATE
+> Task :library:generateReleaseResources UP-TO-DATE
+> Task :library:packageReleaseResources UP-TO-DATE
+> Task :library:parseReleaseLocalResources UP-TO-DATE
+> Task :library:generateReleaseRFile UP-TO-DATE
+> Task :library:compileReleaseKotlin UP-TO-DATE
+> Task :library:javaPreCompileRelease UP-TO-DATE
+> Task :library:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :library:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :svga-coil3:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :svga-coil3:generateReleaseResources UP-TO-DATE
+> Task :svga-coil3:packageReleaseResources UP-TO-DATE
+> Task :svga-coil3:parseReleaseLocalResources UP-TO-DATE
+> Task :svga-coil3:generateReleaseRFile UP-TO-DATE
+> Task :svga-loader:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :svga-loader:preBuild UP-TO-DATE
+> Task :svga-loader:preReleaseBuild UP-TO-DATE
+> Task :svga-loader:generateReleaseResValues UP-TO-DATE
+> Task :svga-loader:generateReleaseResources UP-TO-DATE
+> Task :svga-loader:packageReleaseResources UP-TO-DATE
+> Task :svga-loader:parseReleaseLocalResources UP-TO-DATE
+> Task :svga-loader:generateReleaseRFile UP-TO-DATE
+> Task :svga-loader:compileReleaseKotlin UP-TO-DATE
+> Task :svga-loader:javaPreCompileRelease UP-TO-DATE
+> Task :svga-loader:compileReleaseJavaWithJavac NO-SOURCE
+> Task :svga-loader:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :svga-coil3:mergeReleaseShaders UP-TO-DATE
+> Task :svga-coil3:compileReleaseShaders NO-SOURCE
+> Task :svga-coil3:generateReleaseAssets UP-TO-DATE
+> Task :svga-coil3:mergeReleaseAssets UP-TO-DATE
+> Task :svga-coil3:javaPreCompileRelease UP-TO-DATE
+> Task :svga-coil3:prepareLintJarForPublish UP-TO-DATE
+> Task :svga-coil3:prepareReleaseArtProfile UP-TO-DATE
+> Task :svga-coil3:processReleaseManifest UP-TO-DATE
+> Task :svga-coil3:writeReleaseAarMetadata UP-TO-DATE
+> Task :svga-coil3:sourceReleaseJar
+> Task :svga-coil3:generatePomFileForReleasePublication
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :library:preDebugBuild UP-TO-DATE
+> Task :library:writeDebugAarMetadata UP-TO-DATE
+> Task :svga-coil3:preDebugBuild UP-TO-DATE
+> Task :svga-coil3:writeDebugAarMetadata UP-TO-DATE
+> Task :svga-compose:preBuild UP-TO-DATE
+> Task :svga-compose:preDebugBuild UP-TO-DATE
+> Task :svga-compose:writeDebugAarMetadata UP-TO-DATE
+> Task :svga-loader:preDebugBuild UP-TO-DATE
+> Task :svga-loader:writeDebugAarMetadata UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :library:generateDebugResValues UP-TO-DATE
+> Task :library:generateDebugResources UP-TO-DATE
+> Task :library:packageDebugResources UP-TO-DATE
+> Task :svga-coil3:generateDebugResValues UP-TO-DATE
+> Task :svga-coil3:generateDebugResources UP-TO-DATE
+> Task :svga-coil3:packageDebugResources UP-TO-DATE
+> Task :svga-compose:generateDebugResValues UP-TO-DATE
+> Task :svga-compose:generateDebugResources UP-TO-DATE
+> Task :svga-compose:packageDebugResources UP-TO-DATE
+> Task :svga-loader:generateDebugResValues UP-TO-DATE
+> Task :svga-loader:generateDebugResources UP-TO-DATE
+> Task :svga-loader:packageDebugResources UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :library:extractDeepLinksDebug UP-TO-DATE
+> Task :library:processDebugManifest UP-TO-DATE
+> Task :svga-coil3:extractDeepLinksDebug UP-TO-DATE
+> Task :svga-coil3:processDebugManifest UP-TO-DATE
+> Task :svga-compose:extractDeepLinksDebug UP-TO-DATE
+> Task :svga-compose:processDebugManifest UP-TO-DATE
+> Task :svga-loader:extractDeepLinksDebug UP-TO-DATE
+> Task :svga-loader:processDebugManifest UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :library:compileDebugLibraryResources UP-TO-DATE
+> Task :library:parseDebugLocalResources UP-TO-DATE
+> Task :library:generateDebugRFile UP-TO-DATE
+> Task :svga-coil3:compileDebugLibraryResources UP-TO-DATE
+> Task :svga-coil3:parseDebugLocalResources UP-TO-DATE
+> Task :svga-coil3:generateDebugRFile UP-TO-DATE
+> Task :svga-compose:compileDebugLibraryResources UP-TO-DATE
+> Task :svga-compose:parseDebugLocalResources UP-TO-DATE
+> Task :svga-compose:generateDebugRFile UP-TO-DATE
+> Task :svga-loader:compileDebugLibraryResources UP-TO-DATE
+> Task :svga-loader:parseDebugLocalResources UP-TO-DATE
+> Task :svga-loader:generateDebugRFile UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :library:compileDebugKotlin UP-TO-DATE
+> Task :library:javaPreCompileDebug UP-TO-DATE
+> Task :library:compileDebugJavaWithJavac UP-TO-DATE
+> Task :library:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :svga-loader:compileDebugKotlin UP-TO-DATE
+> Task :svga-loader:javaPreCompileDebug UP-TO-DATE
+> Task :svga-loader:compileDebugJavaWithJavac NO-SOURCE
+> Task :svga-loader:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :svga-coil3:compileReleaseKotlin
+> Task :svga-coil3:compileDebugKotlin
+> Task :svga-coil3:extractReleaseAnnotations
+> Task :svga-coil3:compileReleaseJavaWithJavac NO-SOURCE
+> Task :svga-coil3:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :svga-coil3:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :svga-coil3:processReleaseJavaRes UP-TO-DATE
+> Task :svga-coil3:mergeReleaseJavaResource UP-TO-DATE
+> Task :svga-coil3:syncReleaseLibJars
+> Task :svga-coil3:bundleReleaseAar
+> Task :svga-coil3:generateMetadataFileForReleasePublication
+> Task :svga-coil3:publishReleasePublicationToMavenRepository
+> Task :svga-coil3:javaPreCompileDebug UP-TO-DATE
+> Task :svga-compose:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :svga-compose:javaPreCompileDebug UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:checkDebugAndroidTestAarMetadata UP-TO-DATE
+> Task :app:generateDebugAndroidTestResValues UP-TO-DATE
+> Task :app:mapDebugAndroidTestSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugAndroidTestResources UP-TO-DATE
+> Task :app:mergeDebugAndroidTestResources UP-TO-DATE
+> Task :app:processDebugAndroidTestManifest UP-TO-DATE
+> Task :app:processDebugAndroidTestResources UP-TO-DATE
+> Task :app:javaPreCompileDebugAndroidTest UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :library:mergeDebugShaders UP-TO-DATE
+> Task :library:compileDebugShaders NO-SOURCE
+> Task :library:generateDebugAssets UP-TO-DATE
+> Task :library:mergeDebugAssets UP-TO-DATE
+> Task :svga-coil3:mergeDebugShaders UP-TO-DATE
+> Task :svga-coil3:compileDebugShaders NO-SOURCE
+> Task :svga-coil3:generateDebugAssets UP-TO-DATE
+> Task :svga-coil3:mergeDebugAssets UP-TO-DATE
+> Task :svga-compose:mergeDebugShaders UP-TO-DATE
+> Task :svga-compose:compileDebugShaders NO-SOURCE
+> Task :svga-compose:generateDebugAssets UP-TO-DATE
+> Task :svga-compose:mergeDebugAssets UP-TO-DATE
+> Task :svga-loader:mergeDebugShaders UP-TO-DATE
+> Task :svga-loader:compileDebugShaders NO-SOURCE
+> Task :svga-loader:generateDebugAssets UP-TO-DATE
+> Task :svga-loader:mergeDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:compressDebugAssets UP-TO-DATE
+> Task :library:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :svga-loader:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :library:processDebugJavaRes UP-TO-DATE
+> Task :svga-loader:processDebugJavaRes UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :library:mergeDebugJniLibFolders UP-TO-DATE
+> Task :library:mergeDebugNativeLibs NO-SOURCE
+> Task :library:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :svga-coil3:mergeDebugJniLibFolders UP-TO-DATE
+> Task :svga-coil3:mergeDebugNativeLibs NO-SOURCE
+> Task :svga-coil3:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :svga-compose:mergeDebugJniLibFolders UP-TO-DATE
+> Task :svga-compose:mergeDebugNativeLibs NO-SOURCE
+> Task :svga-compose:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :svga-loader:mergeDebugJniLibFolders UP-TO-DATE
+> Task :svga-loader:mergeDebugNativeLibs NO-SOURCE
+> Task :svga-loader:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :app:mergeDebugNativeLibs UP-TO-DATE
+> Task :app:stripDebugDebugSymbols UP-TO-DATE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :app:mergeDebugAndroidTestShaders UP-TO-DATE
+> Task :app:compileDebugAndroidTestShaders NO-SOURCE
+> Task :app:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :app:mergeDebugAndroidTestAssets UP-TO-DATE
+> Task :app:compressDebugAndroidTestAssets UP-TO-DATE
+> Task :app:desugarDebugAndroidTestFileDependencies UP-TO-DATE
+> Task :app:checkDebugAndroidTestDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebugAndroidTest UP-TO-DATE
+> Task :app:mergeDebugAndroidTestJniLibFolders UP-TO-DATE
+> Task :app:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :app:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :app:validateSigningDebugAndroidTest UP-TO-DATE
+> Task :app:writeDebugAndroidTestSigningConfigVersions UP-TO-DATE
+
+> Task :svga-coil3:compileDebugKotlin
+w: file:///D:/workplace/android/SVGAPlayer-Android/svga-coil3/src/main/java/com/opensource/svgaplayer/coil3/SvgaBindings.kt:29:78 'field scaledDensity: Float' is deprecated. Deprecated in Java.
+
+> Task :svga-coil3:compileDebugJavaWithJavac NO-SOURCE
+> Task :svga-coil3:bundleLibRuntimeToJarDebug
+> Task :svga-coil3:bundleLibCompileToJarDebug
+> Task :svga-coil3:processDebugJavaRes UP-TO-DATE
+> Task :svga-compose:compileDebugKotlin
+> Task :svga-compose:compileDebugJavaWithJavac NO-SOURCE
+> Task :svga-compose:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :svga-compose:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :svga-compose:processDebugJavaRes UP-TO-DATE
+> Task :app:mergeLibDexDebug
+> Task :app:mergeLibDexDebugAndroidTest UP-TO-DATE
+> Task :app:compileDebugKotlin
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:mergeDebugJavaResource UP-TO-DATE
+> Task :app:mergeProjectDexDebug UP-TO-DATE
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect UP-TO-DATE
+> Task :app:compileDebugAndroidTestKotlin
+> Task :app:compileDebugAndroidTestJavaWithJavac UP-TO-DATE
+> Task :app:dexBuilderDebugAndroidTest
+> Task :app:mergeDebugAndroidTestGlobalSynthetics UP-TO-DATE
+> Task :app:processDebugAndroidTestJavaRes UP-TO-DATE
+> Task :app:mergeDebugAndroidTestJavaResource UP-TO-DATE
+> Task :app:mergeProjectDexDebugAndroidTest
+> Task :app:packageDebugAndroidTest
+> Task :app:createDebugAndroidTestApkListingFileRedirect UP-TO-DATE
+> Task :app:connectedDebugAndroidTest
+Starting 2 tests on SM-A125N - 12
+
+SM-A125N - 12 Tests 2/2 completed. (0 skipped) (0 failed)
+Finished 2 tests on SM-A125N - 12
+
+[Incubating] Problems report is available at: file:///D:/workplace/android/SVGAPlayer-Android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.2/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 5m 11s
+182 actionable tasks: 21 executed, 161 up-to-date

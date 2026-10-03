@@ -46,7 +46,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     var isAnimating = false
-        private set
+        internal set
 
     var loops = 0
 
@@ -60,6 +60,7 @@ open class SVGAImageView @JvmOverloads constructor(
     var fillMode: FillMode = FillMode.Forward
     var callback: SVGACallback? = null
 
+    private var modernPlayback: SvgaLegacyViewSession? = null
     private var mAnimator: ValueAnimator? = null
     private var mItemClickAreaListener: SVGAClickAreaListener? = null
     private var mAntiAlias = true
@@ -132,6 +133,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     private fun parserSource(source: String) {
+        sourceLoader?.let { it(this, source, mAutoPlay); return }
         val refImgView = WeakReference<SVGAImageView>(this)
         val parser = SVGAParser(context)
         if (source.startsWith("http://") || source.startsWith("https://")) {
@@ -167,6 +169,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     fun startAnimation(range: SVGARange?, reverse: Boolean = false) {
+        modernSession()?.let { it.start(range, reverse); return }
         stopAnimation(false)
         play(range, reverse)
     }
@@ -184,7 +187,7 @@ open class SVGAImageView @JvmOverloads constructor(
         val animator = ValueAnimator.ofInt(mStartFrame, mEndFrame)
         animator.interpolator = LinearInterpolator()
         animator.duration =
-            ((mEndFrame - mStartFrame + 1) * (1000 / videoItem.FPS) / generateScale()).toLong()
+            ((mEndFrame - mStartFrame + 1) * (1000.0 / videoItem.FPS.coerceAtLeast(1))).toLong()
         animator.repeatCount = if (loops <= 0) 99999 else loops - 1
         animator.addUpdateListener(mAnimatorUpdateListener)
         animator.addListener(mAnimatorListener)
@@ -294,6 +297,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     fun clear() {
+        modernPlayback?.close(); modernPlayback = null
         getSVGADrawable()?.cleared = true
         getSVGADrawable()?.clear()
         // 清除对 drawable 的引用
@@ -305,11 +309,18 @@ open class SVGAImageView @JvmOverloads constructor(
         callback?.onPause()
     }
 
+    /** Resume a resource-backed presentation without resetting its position or loop count. */
+    fun resumeAnimation() {
+        modernSession()?.let { it.resume(); return }
+        startAnimation()
+    }
+
     fun stopAnimation() {
         stopAnimation(clear = clearsAfterStop)
     }
 
     fun stopAnimation(clear: Boolean) {
+        modernPlayback?.let { it.pause(); getSVGADrawable()?.cleared = clear; return }
         mAnimator?.cancel()
         mAnimator?.removeAllListeners()
         mAnimator?.removeAllUpdateListeners()
@@ -320,6 +331,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     override fun setImageDrawable(drawable: Drawable?) {
+        modernPlayback?.close(); modernPlayback = null
         getSVGADrawable()?.setTextScrollEnabled(false)
         isStaticVideoItem = false
         (drawable as? SVGADrawable)?.setTextScrollAttached(false)
@@ -411,7 +423,14 @@ open class SVGAImageView @JvmOverloads constructor(
         }
     }
 
+    private fun modernSession(): SvgaLegacyViewSession? {
+        val drawable = getSVGADrawable() ?: return null
+        val resource = drawable.videoItem.resource ?: return null
+        return modernPlayback ?: SvgaLegacyViewSession(this, drawable, resource).also { modernPlayback = it }
+    }
+
     fun stepToFrame(frame: Int, andPlay: Boolean) {
+        modernSession()?.let { it.seek(frame, andPlay); return }
         pauseAnimation()
         val drawable = getSVGADrawable() ?: return
         drawable.updateCurrentFrame(frame)
@@ -472,6 +491,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        modernPlayback?.close(); modernPlayback = null
         scope?.close()
         scope = null
         if (isAddOnPreDraw) {
@@ -527,7 +547,9 @@ open class SVGAImageView @JvmOverloads constructor(
         }
     } // end of AnimatorUpdateListener
 
-    private companion object {
+    companion object {
+        /** Install at application startup to route XML sources through the host's modern loader. */
+        var sourceLoader: ((SVGAImageView, String, Boolean) -> Unit)? = null
         const val RECT_VISIBLE_CHECK_INTERVAL_MILLIS = 100L
     }
 }

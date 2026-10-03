@@ -30,6 +30,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun setupData() {
+        items.add(SampleItem("Native Compose / Coil 3", Intent(this, SvgaModernActivity::class.java)))
+        items.add(SampleItem("View / Coil 3", Intent(this, SvgaModernActivity::class.java).putExtra("view", true)))
         items.add(
             SampleItem(
                 "Animation From Assets",

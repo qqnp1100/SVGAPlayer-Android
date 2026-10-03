@@ -1,0 +1,191 @@
+package com.opensource.svgaplayer
+
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Path
+import android.widget.ImageView
+import com.opensource.svgaplayer.drawer.SVGACanvasDrawer
+import com.opensource.svgaplayer.proto.MovieEntity
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import org.json.JSONObject
+import java.io.File
+import java.io.FilterInputStream
+import java.io.InputStream
+import java.util.zip.InflaterInputStream
+import java.util.zip.ZipInputStream
+
+/** Immutable, fully prepared data. Bitmaps use GC ownership: eviction never recycles live pixels. */
+class SvgaResource private constructor(private val data: SVGAVideoEntity) {
+    val width get() = data.videoSize.width.toInt()
+    val height get() = data.videoSize.height.toInt()
+    val frames get() = data.frames
+    val fps get() = data.FPS
+    val layerKeys: List<String> get() = data.spriteList.mapNotNull { it.imageKey }.filterNot { it.endsWith(".matte") }.distinct()
+    val sizeBytes: Long get() = audioTracks.sumOf { it.bytes.size.toLong() } + data.imageMap.values.sumOf { it.allocationByteCount.toLong() } +
+        data.spriteList.sumOf { it.frames.size.toLong() * 256 } + 1024
+    fun newVideoEntity(): SVGAVideoEntity = SVGAVideoEntity(data).also { it.resource = this }
+    fun layerSize(key: String): android.util.Size? {
+        val sprite = data.spriteList.firstOrNull { it.imageKey?.removeSuffix(".matte") == key } ?: return null
+        return android.util.Size(sprite.frames.maxOfOrNull { it.layout.width.toInt() } ?: 0,
+            sprite.frames.maxOfOrNull { it.layout.height.toInt() } ?: 0)
+    }
+    fun newRenderer(bindings: SVGADynamicEntity = SVGADynamicEntity()) = SvgaRenderer(newVideoEntity(), bindings)
+
+    companion object {
+        const val MAX_INPUT_BYTES = 64L * 1024 * 1024
+        const val MAX_EXPANDED_BYTES = 128L * 1024 * 1024
+
+        /** Caller supplies a private staging directory, which may be removed after this returns. */
+        suspend fun decode(input: InputStream, directory: File, width: Int = 0, height: Int = 0,
+            maxDecodedBytes: Long = MAX_EXPANDED_BYTES): SvgaResource {
+            val job = currentCoroutineContext()
+            fun bounded(stream: InputStream, limit: Long) = object : FilterInputStream(stream) {
+                var total = 0L
+                private fun count(n: Int): Int { job.ensureActive(); if (n > 0) {
+                    total += n; require(total <= limit) { "SVGA stream exceeds $limit bytes" }
+                }; return n }
+                override fun read(): Int { val n = super.read(); count(if (n < 0) 0 else 1); return n }
+                override fun read(b: ByteArray, off: Int, len: Int) = count(`in`.read(b, off, len))
+            }
+            val stream = bounded(input, MAX_INPUT_BYTES).buffered()
+            stream.mark(4)
+            val zip = stream.read() == 0x50 && stream.read() == 0x4b
+            stream.reset()
+            val video: SVGAVideoEntity
+            if (zip) {
+                directory.mkdirs()
+                var total = 0L
+                var entries = 0
+                ZipInputStream(stream).use { archive ->
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        job.ensureActive()
+                        val entry = archive.nextEntry ?: break
+                        require(++entries <= 4096) { "Too many ZIP entries" }
+                        val file = File(directory, entry.name).canonicalFile
+                        require(file.path.startsWith(directory.canonicalPath + File.separator)) { "Unsafe ZIP entry" }
+                        if (entry.isDirectory) file.mkdirs() else {
+                            file.parentFile?.mkdirs()
+                            file.outputStream().use { out ->
+                                while (true) {
+                                    job.ensureActive()
+                                    val n = archive.read(buffer); if (n < 0) break
+                                    total += n; require(total <= MAX_EXPANDED_BYTES) { "ZIP too large" }
+                                    out.write(buffer, 0, n)
+                                }
+                            }
+                        }
+                        archive.closeEntry()
+                    }
+                }
+                val binary = File(directory, "movie.binary")
+                video = if (binary.isFile) binary.inputStream().use { SVGAVideoEntity(MovieEntity.ADAPTER.decode(it), directory) }
+                else SVGAVideoEntity(JSONObject(File(directory, "movie.spec").readText()), directory)
+            } else {
+                video = bounded(InflaterInputStream(stream), MAX_EXPANDED_BYTES).use {
+                    SVGAVideoEntity(MovieEntity.ADAPTER.decode(it), directory)
+                }
+            }
+            require(video.frames in 1..100000 && video.FPS in 1..240 &&
+                video.videoSize.width > 0 && video.videoSize.height > 0) { "Invalid SVGA metadata" }
+            val json = if (zip && video.movieItem == null) JSONObject(File(directory, "movie.spec").readText()).optJSONObject("images") else null
+            val images = video.movieItem?.images.orEmpty()
+            val audioKeys = video.movieItem?.audios.orEmpty().mapNotNull { it.audioKey }.toSet()
+            val keys = if (json != null) json.keys().asSequence().toList() else images.keys.toList()
+            var pixels = 0L
+            for (key in keys) {
+                job.ensureActive()
+                if (key in audioKeys) continue
+                val bytes = images[key]?.toByteArray()
+                fun imageFile(name: String): File {
+                    val file = listOf(name, "$name.png", "$key.png").map { File(directory, it).canonicalFile }
+                        .firstOrNull { it.path.startsWith(directory.canonicalPath + File.separator) && it.isFile }
+                    return requireNotNull(file) { "Missing image $key" }
+                }
+                var file = if (json != null) imageFile(json.getString(key)) else null
+                val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                if (file != null) BitmapFactory.decodeFile(file.path, opts)
+                else BitmapFactory.decodeByteArray(bytes!!, 0, bytes.size, opts)
+                if (opts.outWidth <= 0 && bytes != null && bytes.size < 4096) {
+                    file = imageFile(bytes.toString(Charsets.UTF_8)); BitmapFactory.decodeFile(file.path, opts)
+                }
+                require(opts.outWidth > 0 && opts.outHeight > 0) { "Invalid image $key" }
+                val scale = video.scaleMap[key] ?: (1f to 1f)
+                val target = if (width > 0 && height > 0) maxOf(
+                    width / video.videoSize.width * scale.first,
+                    height / video.videoSize.height * scale.second).coerceAtMost(1.0) else 1.0
+                opts.inJustDecodeBounds = false
+                opts.inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                opts.inSampleSize = 1
+                while (1.0 / (opts.inSampleSize * 2) >= target && opts.inSampleSize < 1024) opts.inSampleSize *= 2
+                pixels += (opts.outWidth.toLong() / opts.inSampleSize) * (opts.outHeight / opts.inSampleSize) * 4
+                require(pixels <= maxDecodedBytes) { "Decoded image budget exceeded" }
+                val bitmap = if (file != null) BitmapFactory.decodeFile(file.path, opts)
+                    else BitmapFactory.decodeByteArray(bytes!!, 0, bytes.size, opts)
+                video.imageMap[key.removeSuffix(".matte")] = requireNotNull(bitmap) { "Cannot decode $key" }.apply { prepareToDraw() }
+            }
+            val scratch = Path()
+            video.spriteList.forEach { sprite -> sprite.frames.forEach { frame ->
+                job.ensureActive()
+                frame.shapes.forEach { it.buildPath() }
+                frame.maskPath?.buildPath(scratch)
+            } }
+            // Audio bytes are retained separately by the session implementation; no encoded image copies remain.
+            val resource = SvgaResource(video)
+            resource.audioTracks = video.movieItem?.audios.orEmpty().mapNotNull { audio ->
+                images[audio.audioKey]?.let { SvgaAudioTrack(it.toByteArray(), audio.startFrame ?: 0,
+                    audio.endFrame ?: video.frames, audio.startTime ?: 0) }
+            }
+            video.movieItem = null
+            return resource
+        }
+    }
+    internal var audioTracks: List<SvgaAudioTrack> = emptyList()
+}
+
+internal data class SvgaAudioTrack(val bytes: ByteArray, val startFrame: Int, val endFrame: Int, val startTimeMillis: Int)
+
+/** Platform-neutral viewport contract; no View is created by this renderer. */
+class SvgaRenderer internal constructor(private val video: SVGAVideoEntity, val bindings: SVGADynamicEntity) : AutoCloseable {
+    private val drawer = SVGACanvasDrawer(video, bindings)
+    private var drawnFrame = -1
+    private var viewportWidth = 0
+    private var viewportHeight = 0
+    private val inverse = android.graphics.Matrix()
+    private val point = FloatArray(2)
+    val hasActiveScrollingText get() = drawer.hasActiveScrollingText
+    fun prepare(width: Int, height: Int) {
+        val picture = android.graphics.Picture()
+        val canvas = picture.beginRecording(width, height)
+        try { drawer.renderFrame(canvas, 0, ImageView.ScaleType.FIT_XY, width, height, 0) }
+        finally { picture.endRecording() }
+    }
+    fun draw(canvas: Canvas, width: Int, height: Int, frame: Int, timeNanos: Long) {
+        if (width <= 0 || height <= 0) return
+        viewportWidth = width; viewportHeight = height; drawnFrame = frame
+        val save = canvas.save()
+        try {
+            canvas.clipRect(0, 0, width, height)
+            drawer.renderFrame(canvas, frame, ImageView.ScaleType.FIT_XY, width, height, timeNanos)
+        } finally { canvas.restoreToCount(save) }
+    }
+    /** Hit test the last displayed frame, inverse-transforming rotated/mirrored layers. */
+    fun hitTest(x: Float, y: Float): String? {
+        if (drawnFrame < 0) return null
+        for (index in video.spriteList.indices.reversed()) {
+            val sprite = video.spriteList[index]
+            val key = sprite.imageKey ?: continue
+            if (key.endsWith(".matte") || bindings.dynamicHidden[key] == true) continue
+            val frame = sprite.frames.getOrNull(drawnFrame) ?: continue
+            if (frame.alpha <= 0 || !frame.transform.invert(inverse)) continue
+            point[0] = x * video.videoSize.width.toFloat() / viewportWidth
+            point[1] = y * video.videoSize.height.toFloat() / viewportHeight
+            inverse.mapPoints(point)
+            if (point[0] >= 0 && point[1] >= 0 && point[0] < frame.layout.width && point[1] < frame.layout.height) return key
+        }
+        return null
+    }
+    fun pause() = drawer.pauseTextScrolling()
+    override fun close() { drawer.clearCaches(); video.clear(); bindings.clearDynamicObjects() }
+}

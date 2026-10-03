@@ -1,1 +1,2 @@
 include ':app', ':library'
+include ':svga-loader', ':svga-coil3', ':svga-compose'

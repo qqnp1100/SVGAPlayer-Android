@@ -32,6 +32,34 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     var scaleType: ImageView.ScaleType = ImageView.ScaleType.MATRIX
 
     private val drawer = SVGACanvasDrawer(videoItem, dynamicItem)
+    private var externalClock = false
+    private var presentationTimeNanos = 0L
+
+    /** The modern adapter owns scheduling; scrolling text uses the same presentation timeline. */
+    fun advanceExternalClock(frame: Int, timeNanos: Long) {
+        externalClock = true
+        textScrollTicker.stop()
+        val changed = currentFrame != frame
+        updateCurrentFrame(frame, false)
+        presentationTimeNanos = timeNanos
+        if (changed || drawer.hasActiveScrollingText) invalidateSelf()
+    }
+
+    /** Show the first frame without a playback or scrolling-text clock. */
+    fun showStaticFrame() {
+        advanceExternalClock(0, 0L)
+        cleared = false
+        setPlaybackActive(false)
+        invalidateSelf()
+    }
+
+    /** Prepare text/path caches on a worker before the first visible frame. */
+    fun prepare(width: Int, height: Int) {
+        val picture = android.graphics.Picture()
+        val canvas = picture.beginRecording(width, height)
+        try { drawer.renderFrame(canvas, currentFrame, scaleType, width, height, 0L) }
+        finally { picture.endRecording() }
+    }
     private var textScrollAttached = true
     private var textScrollVisible = true
     private val textScrollTicker = TextScrollTicker(
@@ -56,8 +84,11 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
             textScrollTicker.onDraw(false)
             return
         }
-        drawer.drawFrame(canvas, currentFrame, scaleType)
-        textScrollTicker.onDraw(drawer.hasActiveScrollingText)
+        if (externalClock) drawer.renderFrame(canvas, currentFrame, scaleType, canvas.width, canvas.height, presentationTimeNanos)
+        else {
+            drawer.drawFrame(canvas, currentFrame, scaleType)
+            textScrollTicker.onDraw(drawer.hasActiveScrollingText)
+        }
     }
 
     internal fun setTextScrollEnabled(enabled: Boolean) {
@@ -67,6 +98,12 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
         } else {
             textScrollTicker.stop()
         }
+    }
+
+    /** Used by external clocks to stop scrolling work while paused or off screen. */
+    fun setPlaybackActive(active: Boolean) {
+        if (externalClock) { if (!active) drawer.pauseTextScrolling() }
+        else setTextScrollEnabled(active)
     }
 
     internal fun setTextScrollAttached(attached: Boolean) {

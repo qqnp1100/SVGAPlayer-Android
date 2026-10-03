@@ -1,5 +1,6 @@
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
+apply from: rootProject.file('publish.gradle')
 
 
 android {
@@ -37,7 +38,8 @@ android {
 
 
 dependencies {
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
     implementation 'com.squareup.wire:wire-runtime:5.3.6'
-    implementation 'androidx.appcompat:appcompat:1.7.1'
+    api 'androidx.appcompat:appcompat:1.7.1'
     testImplementation 'junit:junit:4.13.2'
 }

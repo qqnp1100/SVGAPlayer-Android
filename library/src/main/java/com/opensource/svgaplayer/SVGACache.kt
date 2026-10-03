@@ -49,7 +49,7 @@ object SVGACache {
             LogUtils.error(TAG, "SVGACache is not init!")
             return
         }
-        SVGAParser.threadPoolExecutor.execute {
+        SVGAParser.execute({ LogUtils.error(TAG, "Cache cleanup queue is full", it) }) {
             clearDir(cacheDir)
             LogUtils.info(TAG, "Clear svga cache done!")
         }
@@ -82,13 +82,9 @@ object SVGACache {
     fun isDefaultCache(): Boolean = type == Type.DEFAULT
 
     fun isCached(cacheKey: String): Boolean {
-        return if (isDefaultCache()) {
-            buildCacheDir(cacheKey)
-        } else {
-            buildSvgaFile(
-                    cacheKey
-            )
-        }.exists()
+        val directory = buildCacheDir(cacheKey)
+        return buildSvgaFile(cacheKey).isFile || (File(directory, ".complete").isFile &&
+            (File(directory, "movie.binary").isFile || File(directory, "movie.spec").isFile))
     }
 
     fun buildCacheKey(str: String): String {

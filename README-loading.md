@@ -1,0 +1,298 @@
+# SVGA 加载与 Compose 接入
+
+该版本把下载、缓存、解码和播放实例分开。Android View 和原生 Compose 默认共用进程内的 `SvgaEngine`；同来源、兼容缓存策略的请求合并下载，同尺寸的资源准备进一步合并。Compose 直接绘制 Canvas，通过 `withFrameNanos` 驱动，不创建 Android View 或 Drawable。
+
+## 模块
+
+| 模块 | 本地发布 artifactId | 内容 |
+| --- | --- | --- |
+| `library` | `svga-core` | 旧 API、只读资源、渲染器、播放时钟、实例音频 |
+| `svga-loader` | `svga-loader` | URL / File / Assets、并发去重、缓存、取消、预加载 |
+| `svga-coil3` | `svga-coil3` | Coil 3.3.0 Fetcher、独立 ImageLoader、View 扩展、填充 |
+| `svga-compose` | `svga-compose` | 原生 Compose 组件、状态、生命周期与交互 |
+
+仅使用 View 时依赖 `svga-coil3`，不会引入 Compose。Compose 项目依赖 `svga-compose`，启用宿主的 Compose 编译插件即可。当前构建使用 Kotlin 2.2.0、AGP 8.12.0、compileSdk 35、minSdk 21；库字节码目标为 Java 17。
+
+```kotlin
+implementation(project(":svga-coil3")) // View 项目
+// 或
+implementation(project(":svga-compose")) // Compose 项目
+```
+
+四个模块共用 `com.opensource.svgaplayer:模块名:3.0.0-SNAPSHOT` 坐标。`publish.gradle` 只配置了仓库内 `build/maven`，未上传到远程仓库：
+
+```shell
+./gradlew publishReleasePublicationToMavenRepository
+```
+
+## View
+
+```kotlin
+import com.opensource.svgaplayer.coil3.loadSvga
+import com.opensource.svgaplayer.coil3.svgaBindings
+
+val handle = svgaView.loadSvga(giftUrl) {
+    iterations = 1 // 0 表示无限循环
+    bindings = svgaBindings {
+        text("user_name", "小明", textSizeSp = 16f)
+        image("avatar", avatarUrl, size = 128, circleCrop = true)
+        hidden("debug_layer")
+    }
+    onReady = { /* 基础图片、填充和音频已准备 */ }
+    onFinished = { /* 自然结束 */ }
+    onError = { error -> /* 处理错误 */ }
+}
+
+handle.pause()
+handle.resume()
+handle.seekToProgress(.5f)
+handle.replay()
+handle.updateBindings(svgaBindings { text("user_name", "小红") })
+handle.cancel()
+```
+
+`updateBindings` 替换该实例的整个填充快照，不重新请求基础资源。新快照准备完成后替换显示，旧请求取消；过期更新不能覆盖新结果。Bitmap 参数为借用，库不回收业务传入的 Bitmap。URL 图片由私有 Coil ImageLoader 加载；基础 SVGA 仍由引擎下载，二者不会重复下载 SVGA 文件。
+
+View API 在主线程调用。不同请求替换时取消并清理会话；相同请求重复绑定会保留播放状态。detach 时立即释放；可用 `restartOnAttach` 配置重新 attach 后自动重载。暂停保留进度，不可见时停止逐帧工作，只保留低频可见性检查。新的 View 适配器用 Choreographer 驱动，滚动文字和音频随同一会话推进。
+
+## 原生 Compose
+
+```kotlin
+import com.opensource.svgaplayer.compose.*
+
+val state = rememberSvgaState()
+val bindings = rememberSvgaBindings(userName, avatarUrl) {
+    text("user_name", userName, textSizeSp = 16f)
+    image("avatar", avatarUrl, circleCrop = true)
+}
+
+SvgaView(
+    source = giftUrl,
+    modifier = Modifier.size(200.dp),
+    state = state,
+    bindings = bindings,
+    iterations = 1,
+    visible = isItemVisible,
+    contentScale = ContentScale.Fit,
+    alignment = Alignment.Center,
+    contentDescription = "礼物动画",
+    onLayerClick = { key -> /* 命中最上方的图层 */ },
+    onFinished = { },
+    onError = { },
+    placeholder = { /* 加载占位 */ },
+    error = { error -> /* 错误内容 */ },
+)
+```
+
+支持 Fit、Crop、FillBounds、None 等 ContentScale 和 Alignment。传入布局真实尺寸，按 64 px 分档；尺寸缩小复用现有资源，放大稳定 120 ms 后后台准备更高规格，保留播放进度。帧状态在绘制阶段读取，不要求父组件逐帧重组。
+
+`state` 提供 `loadState`、`error`、`isPlaying`、`currentFrame`、`progress`、`completedIterations`，以及 pause / resume / seekToProgress / replay。同一个 state 只能绑定一个组件。换回调不会重新加载；离开组合释放会话，页面进入后台停止帧循环。列表屏幕外可见性由业务传 `visible`。
+
+两种入口都支持 `speed`、`startFrame`、`endFrame`、`reverse`，以及 `SvgaHiddenBehavior`：PAUSE 恢复原进度，CONTINUE_TIMELINE 按经过时间定位，STOP 等待显式恢复。倒放静音；Android 21/22 的非 1 倍速播放静音，Android 23+ 音频跟随正向倍速。
+
+文字支持颜色、sp 字号、滚动速度；Android 23+ 支持 StaticLayout 多行、省略和对齐。Compose 模块另有接受 `Color` 和 `TextUnit` 的 `text` 扩展。图片支持 Bitmap、Coil 支持的来源、必需/可选失败策略和圆形裁剪。填充需使用素材实际图层 key，可通过 `resource.layerKeys` 查看。
+
+## 来源与缓存
+
+```kotlin
+SvgaSource.Remote("https://example.com/gift.svga", version = "v2")
+SvgaSource.LocalFile(file)
+SvgaSource.Asset("gift.svga")
+```
+
+字符串只接受 HTTP(S)、`file://` 和 `file:///android_asset/`；普通相对路径请显式使用 Asset。View 和 Compose 的 `source` 也接受完整请求：
+
+```kotlin
+val request = SvgaRequest(
+    source = SvgaSource.Remote(giftUrl),
+    cachePolicy = SvgaCachePolicy.ALL,
+    namespace = "account-123",
+    headers = mapOf("Authorization" to token),
+    // width / height 为 0 时，由展示入口提供实际像素尺寸。
+)
+```
+
+| 策略 | 内存 | 磁盘 |
+| --- | --- | --- |
+| NONE | 关闭 | 关闭 |
+| MEMORY | 开启 | 关闭 |
+| DISK | 关闭 | 开启 |
+| ALL | 开启 | 开启 |
+
+`memoryRead` / `memoryWrite` 分别覆盖强引用 LRU 的读写，`diskRead` / `diskWrite` 分别覆盖磁盘读写；弱引用索引由独立的 `weakMemoryCache` 控制。`cacheOnly` 禁止网络，可读取已有缓存；`refresh` 绕过内存快速命中并重新获取来源；`allowStaleOnError` 显式允许网络失败时使用已有磁盘正文，默认关闭。
+
+请求头快照、完整 URL、版本、namespace 纳入来源身份；文件使用规范路径、长度和修改时间。内容 SHA-256 和解码规格区分资源缓存。HTTP 使用 Cache-Control、ETag、Last-Modified、Expires 和 Age，过期条件验证；no-store 不写可复用缓存。没有新鲜度的 HTTP 响应不会无限从内存返回。NONE 允许解压/音频所需临时文件，不持久复用。
+
+引擎默认内存 32 MiB、磁盘 128 MiB、下载并发 4、解码并发 2、单次解码像素预算 128 MiB；可在构造时修改。内存计费包含实际 Bitmap 分配量、音频字节及帧对象估算。提供 `clearMemory()`、挂起的 `clearDisk()`、`preload(request)`（准备完整资源）和诊断计数器。
+
+自定义实例通过 `SvgaImageLoader(context, engine)` 注入两种入口；默认使用共享实例，不覆盖宿主 Coil SingletonImageLoader。基础资源使用有容量上限的强引用 LRU、弱引用索引和 GC 所有权，不放入 Coil 通用内存缓存；会话 clear 和缓存淘汰不会 recycle 仍被另一个实例使用的基础 Bitmap。引擎不保证跨进程下载去重。
+
+## 核心改动
+
+- zlib 限长流式 Protobuf 解码，避免完整解压 ByteArray 的复制；ZIP 在暂存目录完整解压后发布。
+- 新链路在后台完成图片采样、路径和首帧文字缓存准备，尺寸来自真实布局。
+- 修复旧默认缓存对 zlib 文件的漏命中、ZIP 就绪判断与等待者锁身份问题，去掉缓存命中的重复入队。
+- 旧线程池满载时返回错误，不在提交线程执行下载/解析；取消下载会断开连接。
+- 按旋转/镜像矩阵统计采样缩放，修复缩放因子在采样比例中抵消；预构建路径无全局可变 Path。
+- 复用每帧 sprite 列表，遮罩分组边界不再逐帧分配数组；遮罩缺失也会正确恢复 Canvas。
+- 旧 View 修正 FPS 整数截断；新时钟覆盖暂停、seek、跳帧、多循环、倒放和倍速。
+
+复杂 matte 仍复用已有软件遮罩合成算法，未声称更换为 GPU 遮罩或取得固定提速比例。图层点击是逆变换后的布局矩形命中，不是逐像素透明度/路径命中。旧 Parser 保留兼容入口；新业务建议使用统一加载器。
+
+## 验证
+
+```shell
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :library:testDebugUnitTest :svga-loader:testDebugUnitTest
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb shell am instrument -w com.example.ponycui_home.svgaplayer.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+示例首页新增 Native Compose / Coil 3 和 View / Coil 3 两项。真机测试覆盖并发合并、单个订阅者取消、缓存隔离、304、失败重试、ZIP 安全、旧 Parser 缓存、原生与 View 逐像素一致性、音频会话隔离、Compose 生命周期及 View 释放。
+
+2026-10-02 最终验证：15 项 JVM 单元测试和 13 项真机 instrumentation 测试全部通过；四模块 Release AAR、sources JAR、POM 和 Gradle module metadata 已生成。
+
+验证设备为 Samsung SM-A125N。用户提供的 head_bg_vip10 / head_bg_vip9 均为 750×400、24 帧、12 FPS，已在两种入口显示；第一轮联网加载观测约 2.40 s / 1.12 s。该数据包含当时网络和设备状态，不是与旧版本的性能对照。截图和原始运行输出位于被 Git 忽略的 `verification`、`device-tests.log`、`build-check.log`。
+
+## 下载进度
+
+View 与 Compose 都支持 `onDownloadProgress`，在主线程回调；Compose 还可读取 `state.downloadProgress`。原有 `state.progress` 仍然是播放进度。
+
+```kotlin
+svgaView.loadSvga(url) {
+    onDownloadProgress = { progress ->
+        val downloaded = progress.bytesRead
+        val percent = progress.fraction?.let { (it * 100).toInt() }
+        // percent 为 null 时显示已下载字节数或不定进度条。
+    }
+}
+
+SvgaView(url, onDownloadProgress = { progress -> /* 更新下载 UI */ })
+
+// 引擎 / Coil 包装器 / 预加载请求也支持回调：
+engine.acquire(SvgaRequest(url)) { progress -> /* 下载进度 */ }
+loader.load(SvgaRequest(url)) { progress -> /* 下载进度 */ }
+engine.preload(SvgaRequest(url).copy(onDownloadProgress = { progress -> /* 下载进度 */ }))
+```
+
+`bytesRead` 是已读取的 HTTP 响应体字节数，`totalBytes` 在 Content-Length 未知或透明 gzip 解压时为 null；`fraction` 为 0～1，未知长度或零长度时为 null。`completed` 表示响应体下载完成，资源仍需解码，播放准备完成请使用 `onReady`。失败和取消不产生虚假的下载完成事件；下载完成后解码仍可能失败。
+
+下载期间约每 100ms 更新一次，慢订阅者会合并中间进度。共享同一次下载的订阅者各自收到更新，后来加入的订阅者收到最新进度；取消一个订阅不会影响其他订阅。内存/磁盘缓存命中、HTTP 304、Assets 和本地文件不会产生下载进度。Compose 更换来源会清空下载状态。
+
+底层 `SvgaRequest.onDownloadProgress`、`engine.acquire` 和 `loader.load` 接受 suspend 回调；引擎在调用方协程上下文串行派发，Coil Fetcher 上下文由 Coil 决定。直接使用底层回调更新 UI 时请切换主线程。View/Compose 入口已处理主线程切换。回调异常会使当前订阅加载失败，回调应保持轻量。
+
+
+## 旧 View 业务迁移
+
+`loader.load(request).newVideoEntity()` 生成互相独立、借用只读资源的展示实体。将其交给旧 `SVGAImageView.setVideoItem` 后，startAnimation / stopAnimation / pauseAnimation / stepToFrame 自动走新版 Choreographer 与 SvgaPlayback 时钟，并拥有独立音频会话。保留 loops、帧区间、倒放、FillMode 和 SVGACallback；不可见或宿主生命周期暂停时停止推进，detach 取消准备并释放音频。动态图片及首帧绘制缓存准备后才开始播放。旧 Parser 产生的实体仍保留原播放链路。
+
+应用启动时可设置 `SVGAImageView.sourceLoader`，把 XML 的 `source` 转给统一业务请求入口；回调收到 View、来源和 autoPlay。`SvgaBindings.Builder.text` 另支持 typeface 与 scrollSpacing，迁移定制文字时无需丢失字体和滚动间距。
+
+`SvgaPlayback.seekFrame` 用整数纳秒精确定位，避免帧号经浮点百分比换算落到前一帧。
+
+## 中断与断点续传
+
+现代加载链路（`SvgaEngine`、Coil 3、View 扩展、原生 Compose）默认启用 `resumeDownloads = true`。下载中断、最后一个订阅者取消或引擎关闭时，会保留符合条件的已下载片段。下次加载同一来源时，包括引擎或应用重建后，会携带 `Range: bytes=<已下载长度>-` 和 `If-Range: <强 ETag>` 请求剩余部分。一个共享订阅者取消时，其他订阅者的下载继续。
+
+```kotlin
+// 默认开启，View 和 Compose 可直接传入 URL，无需另外配置。
+val request = SvgaRequest(url)
+engine.acquire(request) { progress ->
+    // 续传时 bytesRead 包含之前保存的字节，totalBytes 是整个文件的长度。
+}
+
+// 按请求关闭续传，或强制从头刷新。
+engine.acquire(request.copy(resumeDownloads = false))
+engine.acquire(request.copy(refresh = true))
+
+// 同时清除完整磁盘缓存和续传片段（会等待正在写片段的下载释放文件）。
+engine.clearDisk()
+```
+
+片段写入遵守 `diskWrite`，复用遵守 `diskRead`；`NONE`、`MEMORY` 缓存策略不会保留片段。`cacheOnly` 不把不完整片段视为可用资源。响应为 `no-store` / `Vary: *`、缺少强 ETag（包括只有弱 ETag 或 Last-Modified）、非 identity 编码时不保留片段，下一次从头下载。自动续传请求使用 `Accept-Encoding: identity`，避免压缩响应与本地字节偏移不一致。手动提供 Range / If-Range 或非 identity Accept-Encoding 时不启用自动续传。
+
+服务端返回 206 时校验偏移、完整长度、ETag、最终 URL 和响应编码；不匹配的 206、416 或异常 304 会丢弃片段并从头重试一次。服务端忽略 Range 或资源更新而返回 200 时，直接用完整新响应替换旧片段，不拼接。此处理遵循 [HTTP Range / If-Range 语义](https://www.rfc-editor.org/rfc/rfc9110.html#name-if-range)。
+
+片段按 URL/资源版本、namespace 和请求头隔离，保存在应用私有缓存 `svga-engine/partials`，不会进入正式缓存或直接交给解码器。下载完成后移动为独立文件，成功解码后才发布完整缓存。片段最长保留 24 小时；独立片段池预算为 `min(diskBytes, 64 MiB)`，清理跳过活动写入，下载结束后再次清理。系统清理缓存或片段过期后会正常从头下载。旧 `SVGAParser` 下载接口不使用此现代引擎。
+## 应用直接使用 loadSvga
+
+View 请求现在保存在 View 的库 tag 中。默认 detach 后关闭；开启 `restartOnAttach` 后，detach 取消当前任务并清理展示，重新 attach 时由库重新加载保留的请求。`clearSvga()` 同时清除保留请求，之后 attach 不会复活旧内容。
+
+迁移既有动态实体业务时，可设置 `useViewControls = true` 和 `onResourceReady`：回调在主线程收到独立 `SVGAVideoEntity`，返回 true 表示业务已接管展示；返回 false 时库释放该实体。未提供回调时库自动 setVideoItem，并依据 autoPlay 调用资源版播放控制。`requestFactory` 在后台接收布局像素尺寸并生成 SvgaRequest，供业务解析资源包路径等来源。下载、缓存、替换、取消和 attach 生命周期仍全部由库处理。
+
+## 弱引用索引与强引用内存缓存
+
+同来源、同网络和磁盘策略的并发请求，即使强/弱内存缓存开关不同，也共享下载；同尺寸进一步共享解码。各订阅者独立执行内存缓存读写策略。`clear()` 会断开展示实体对共享资源的引用，不回收其他实例仍在使用的基础 Bitmap。清空引擎缓存后，没有其他持有者的基础资源交由 GC 回收。
+
+`updateBindings()` 会替换当前请求保留的填充快照，重新 attach 使用最新快照。最终 `cancel()` / `close()` 会释放 handle 对 View、请求配置和回调的引用；借用的业务 Bitmap 不会被库 recycle。解析或动态图片加载在 clear 后才完成时，不再把过期结果写回已清理的实体。
+
+默认请求同时开启强引用 LRU 和弱引用资源索引。弱索引不设置资源字节容量上限，不持有资源强引用；播放器或业务仍持有资源时，即使该资源已被 LRU 淘汰（包括资源超过 LRU 容量），后续相同身份、版本和解码规格的请求仍可复用它。
+
+```kotlin
+// 每次加载独立控制：只用弱缓存，不写入或读取强引用 LRU。
+val request = SvgaRequest(url).copy(
+    memoryCache = false,
+    weakMemoryCache = true,
+)
+loader.load(request) // engine.acquire / preload 同样适用
+
+// View
+svgaView.loadSvga(url) {
+    memoryCache = false
+    weakMemoryCache = true
+}
+
+// 原生 Compose
+SvgaView(url, memoryCache = false, weakMemoryCache = true)
+
+// 同时关闭两种资源内存缓存，仍可使用磁盘缓存。
+loader.load(SvgaRequest(url).copy(memoryCache = false, weakMemoryCache = false))
+
+// 引擎级总开关：关闭后，该引擎内任何请求都不会使用弱索引。
+val engine = SvgaEngine(context, weakMemoryCacheEnabled = false)
+```
+
+两个请求开关均为 nullable：null 继承 `cachePolicy.memory`。默认 ALL（以及 MEMORY）启用两层，NONE / DISK 默认关闭两层；显式 true / false 可独立覆盖。例如 `memoryCache = false` 不会关闭默认弱缓存。既有 `memoryRead` / `memoryWrite` 优先于 `memoryCache`，仅控制强缓存读写；若要禁用所有资源内存缓存，还需设置 `weakMemoryCache = false`。View/Compose 未设置开关时保留传入 SvgaRequest 的配置；设置后覆盖对应字段。
+
+查询顺序是强 LRU → 弱索引 → 磁盘/网络；弱命中允许按当前请求配置提升到强 LRU。弱索引与强缓存都检查来源、尺寸和新鲜度，refresh 绕过并失效两层，no-store 不登记可复用资源。`clearMemory()` 清空两层索引，不回收播放实例正在使用的资源。`memoryHits` 记录强命中，`weakMemoryHits` 单独记录弱命中。
+
+通过 `ReferenceQueue` 在缓存操作时清理已回收资源对应的 key 和引用；队列中的旧引用不会误删同 key 的新资源。索引不持有 View、Context、回调或播放实例。弱引用非空只代表资源仍存活，不能作为正在播放的判断，也不保证预加载资源在下一次请求时仍然存在。32 MiB 的默认预算仅约束强引用 LRU，并不是所有活动资源的总内存上限。
+
+## RecyclerView 刷新不重播
+
+`loadSvga` 默认 `reuseOnRebind = true`：同一个 View 上来源、版本、请求配置和播放参数未变时，复用当前 handle、Drawable 和播放时钟，不先清空、不重新下载或解码、不回到第一帧。正在加载的相同请求也复用，下载进度及完成/错误回调更新为最近一次绑定的回调；已准备好的复用不会再次触发 onReady。手动暂停、播放进度和已完成次数都保留。
+
+```kotlin
+// onBindViewHolder 中可以重复调用；不要在调用前 clear()/stopAnimation()。
+holder.svga.loadSvga(item.url) {
+    reuseOnRebind = true       // 默认
+}
+
+// 真正回收 ViewHolder 时立即释放，避免池中持有画面与回调。
+override fun onViewRecycled(holder: Holder) {
+    holder.svga.clearSvga()
+    super.onViewRecycled(holder)
+}
+```
+
+只修改动态填充时保留旧画面，准备新填充后在当前帧替换，不重置播放时钟。来源、文件版本/长度/修改时间、请求头、namespace、解码尺寸或播放配置变化时正常替换。要明确重新播放可调用 handle.replay()；要强制重新创建请求可设置 reuseOnRebind = false，或传入 refresh = true 的 SvgaRequest。
+
+detach、clearSvga()/cancel() 均立即释放，不保留离屏会话；重新 attach 是否自动加载由 restartOnAttach 控制。自定义 requestFactory / onResourceReady 更换函数实例时保守地重新加载，避免忽略业务填充或资源变更；若需复用，应使用稳定函数实例并将业务版本体现在 source/SvgaRequest 中。
+
+库只能复用同一 View 的播放。Adapter 若清空数据后重新创建 ViewHolder，或 ItemAnimator 对整个条目做淡入淡出，仍可能出现视觉变化。列表应保持稳定的条目身份并做差量更新；不需要内容变更动画时可设置 `(recyclerView.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false`，依据 [Android 官方 API](https://developer.android.com/reference/androidx/recyclerview/widget/SimpleItemAnimator#setSupportsChangeAnimations(boolean)) 关闭该类动画。无需关闭全部移动/插入动画。
+
+## loadSvga 静态首帧
+
+```kotlin
+svgaView.loadSvga(url) {
+    staticImage = true
+    bindings = svgaBindings { text("name", "小明") }
+    onReady = { /* 首帧已准备并展示 */ }
+}
+```
+
+staticImage 默认 false。为 true 时固定显示文件第 0 帧，优先于 autoPlay、startFrame、endFrame 和 reverse；不创建播放时钟、不准备音频、不启动逐帧或滚动文字动画，handle.resume()/replay()/seekToProgress() 不改变首帧。动态填充更新仍显示第 0 帧。此配置不会减少 SVGA 基础资源的解析量，可照常复用已解码缓存。
+
+与 autoPlay = false 不同，后者只是初始暂停，仍可 resume。需要从静态切回动画时，再次 loadSvga 并设置 staticImage = false，会创建正常播放会话。相同静态请求重复绑定继续复用画面；detach 仍立即释放。
+
+静态模式由 loader 管理展示，包括 useViewControls = true 时；因此不能同时设置接管展示的 onResourceReady。使用 bindings 定制首帧，并用 onReady 获取就绪通知。直接调用 SVGAImageView 自身的播放方法属于业务主动接管，不受 handle 的静态播放限制。

@@ -41,8 +41,8 @@ internal object BitmapSampleSizeCalculator {
         svgaHeight: Int
     ): Int {
         // Raw height and width of image
-        val height = (outHeight * scaleY).toInt()
-        val width = (outWidth * scaleX).toInt()
+        val height = outHeight
+        val width = outWidth
         var inSampleSize = 1
 
         if (reqHeight <= 0 || reqWidth <= 0) {
@@ -52,8 +52,8 @@ internal object BitmapSampleSizeCalculator {
             return inSampleSize
         }
 
-        val targetWidth = Math.max(width * reqWidth / svgaWidth, 1)
-        val targetHeight = Math.max(height * reqHeight / svgaHeight, 1)
+        val targetWidth = Math.max((width * kotlin.math.abs(scaleX) * reqWidth / svgaWidth).toInt(), 1)
+        val targetHeight = Math.max((height * kotlin.math.abs(scaleY) * reqHeight / svgaHeight).toInt(), 1)
 
 
         if (height > targetHeight || width > targetWidth) {

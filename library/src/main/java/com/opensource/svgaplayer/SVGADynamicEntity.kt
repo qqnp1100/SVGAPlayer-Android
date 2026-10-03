@@ -1,6 +1,8 @@
 package com.opensource.svgaplayer
 
 import android.graphics.Bitmap
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.text.BoringLayout
@@ -61,12 +63,13 @@ class SVGADynamicEntity {
     private var isClean = false
     @Volatile
     private var isLoad = false
+    private var imageGeneration = 0L
 
     fun setHidden(value: Boolean, forKey: String) {
         this.dynamicHidden.put(forKey, value)
     }
 
-    fun setDynamicImage(bitmap: Bitmap, forKey: String) {
+    @Synchronized fun setDynamicImage(bitmap: Bitmap, forKey: String) {
         this.isClean = false
         replaceBitmap(forKey, bitmap, dynamicOutImage, ownedByLibrary = false)
     }
@@ -79,7 +82,7 @@ class SVGADynamicEntity {
         return dynamicInAnimatedImage[key] ?: dynamicOutAnimatedImage[key]
     }
 
-    fun setDynamicImage(data: ByteArray, forKey: String) {
+    @Synchronized fun setDynamicImage(data: ByteArray, forKey: String) {
         this.isClean = false
         SVGADynamicImage.decode(data)?.let {
             clearBitmapForKey(forKey)
@@ -100,16 +103,24 @@ class SVGADynamicEntity {
         setDynamicImage(data, forKey)
     }
 
-    fun setDynamicImage(url: String, forKey: String) {
+    @Synchronized fun setDynamicImage(url: String, forKey: String) {
         this.isClean = false
         dynamicOutImageKeyUrl[forKey] = url
     }
 
-    suspend fun requestDynamicImage(imageView: ImageView) {
+    private val imageLoadMutex = Mutex()
+
+    suspend fun requestDynamicImage(imageView: ImageView) = imageLoadMutex.withLock {
+        try { requestDynamicImageLocked(imageView) }
+        catch (e: Throwable) { isLoad = false; throw e }
+    }
+
+    private suspend fun requestDynamicImageLocked(imageView: ImageView) {
         if (isLoad) {
             return
         }
         isLoad = true
+        val generation = synchronized(this) { imageGeneration }
         if (SVGAParser.customDynamicImageLoad != null) {
             val dynamicImageLoad = SVGAParser.customDynamicImageLoad ?: return
             val dynamicImageDataLoad =
@@ -121,17 +132,17 @@ class SVGADynamicEntity {
                 var hasDecodedImageData = false
                 dynamicImageDataLoad?.loadImageData(imageView, entry.value, entry.key)
                     ?.let { data ->
-                        hasDecodedImageData = decodeDynamicImage(data, entry.key)
+                        hasDecodedImageData = decodeDynamicImage(data, entry.key, generation)
                     }
                 if (hasDecodedImageData) {
                     continue
                 }
                 dynamicImageLoad.loadImage(imageView, entry.value, entry.key)
                     ?.let {
-                        if (isClean) {
-                            return
+                        synchronized(this) {
+                            if (isClean || imageGeneration != generation) return
+                            replaceBitmap(entry.key, it, dynamicOutImage, ownedByLibrary = false)
                         }
-                        replaceBitmap(entry.key, it, dynamicOutImage, ownedByLibrary = false)
                     }
             }
             return
@@ -148,7 +159,7 @@ class SVGADynamicEntity {
                     it.connect()
                     it.inputStream.use { stream ->
                         val data = readDynamicImageBytes(stream)
-                        decodeDynamicImage(data, entry.key)
+                        decodeDynamicImage(data, entry.key, generation)
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -163,25 +174,31 @@ class SVGADynamicEntity {
         }
     }
 
-    private fun decodeDynamicImage(data: ByteArray, key: String): Boolean {
+    private fun decodeDynamicImage(data: ByteArray, key: String, generation: Long): Boolean {
         if (isClean) {
             return false
         }
         SVGADynamicImage.decode(data)?.let {
-            if (isClean) {
-                return false
+            synchronized(this) {
+                if (isClean || imageGeneration != generation) {
+                    it.clear()
+                    return false
+                }
+                clearBitmapForKey(key)
+                clearAnimatedImageForKey(key)
+                dynamicInAnimatedImage[key] = it
+                return true
             }
-            clearBitmapForKey(key)
-            clearAnimatedImageForKey(key)
-            dynamicInAnimatedImage[key] = it
-            return true
         }
         BitmapFactory.decodeByteArray(data, 0, data.size)?.let {
-            if (isClean) {
-                return false
+            synchronized(this) {
+                if (isClean || imageGeneration != generation) {
+                    it.recycle()
+                    return false
+                }
+                replaceBitmap(key, it, dynamicInImage, ownedByLibrary = true)
+                return true
             }
-            replaceBitmap(key, it, dynamicInImage, ownedByLibrary = true)
-            return true
         }
         return false
     }
@@ -312,7 +329,8 @@ class SVGADynamicEntity {
         this.dynamicDrawerSized.put(forKey, drawer)
     }
 
-    fun clearDynamicObjects() {
+    @Synchronized fun clearDynamicObjects() {
+        ++imageGeneration
         isLoad = false
         this.isClean = true
         this.isTextDirty = true
