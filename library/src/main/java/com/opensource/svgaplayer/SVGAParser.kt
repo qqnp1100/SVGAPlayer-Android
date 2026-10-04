@@ -217,7 +217,7 @@ class SVGAParser(context: Context?) {
         private val handler: Handler by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { Handler(Looper.getMainLooper()!!) }
         fun handler(): Handler = handler
         var customDynamicImageLoad: CustomDynamicImageLoad? = null
-        private var customBitmapDecoder: BitmapDecoder = object : BitmapDecoder {
+        private val defaultBitmapDecoder: BitmapDecoder = object : BitmapDecoder {
             override fun onLoad(
                 imageView: View,
                 path: String,
@@ -266,6 +266,8 @@ class SVGAParser(context: Context?) {
         }
 
         internal var threadPoolExecutor = createDefaultExecutor()
+        private var customBitmapDecoder: BitmapDecoder = defaultBitmapDecoder
+        internal fun usesDefaultBitmapDecoder() = customBitmapDecoder === defaultBitmapDecoder
         internal var coroutineDispatcher = threadPoolExecutor.asCoroutineDispatcher()
 
         internal fun execute(onRejected: (Exception) -> Unit, task: () -> Unit) {

@@ -88,15 +88,20 @@ fun SvgaView(
     onDownloadProgress: (SvgaDownloadProgress) -> Unit = {},
     memoryCache: Boolean? = null,
     weakMemoryCache: Boolean? = null,
+    bitmapConfig: android.graphics.Bitmap.Config? = null,
+    skipInvisibleImages: Boolean? = null,
 ) {
     require(iterations >= 0 && speed > 0 && speed.isFinite())
     val context = LocalContext.current
     val imageLoader = loader ?: remember(context) { SvgaImageLoader.get(context) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val direction = LocalLayoutDirection.current
-    val request = remember(source, cachePolicy, memoryCache, weakMemoryCache) {
+    val decodeDefaults = SvgaDecodeOptions.defaults
+    val request = remember(source, cachePolicy, memoryCache, weakMemoryCache, bitmapConfig, skipInvisibleImages, decodeDefaults) {
         val base = (source as? SvgaRequest) ?: SvgaRequest(SvgaSource.from(source), cachePolicy = cachePolicy)
-        base.copy(memoryCache = memoryCache ?: base.memoryCache, weakMemoryCache = weakMemoryCache ?: base.weakMemoryCache)
+        base.copy(memoryCache = memoryCache ?: base.memoryCache, weakMemoryCache = weakMemoryCache ?: base.weakMemoryCache,
+            bitmapConfig = bitmapConfig ?: base.bitmapConfig ?: decodeDefaults.bitmapConfig,
+            skipInvisibleImages = skipInvisibleImages ?: base.skipInvisibleImages ?: decodeDefaults.skipInvisibleImages)
     }
     var size by remember { mutableStateOf(IntSize.Zero) }
     var decodeSize by remember(request) { mutableStateOf(IntSize.Zero) }
@@ -127,15 +132,18 @@ fun SvgaView(
     }
     val width = decodeSize.width
     val height = decodeSize.height
-    LaunchedEffect(request, width, height, imageLoader, state) {
+    // Unknown custom scales can draw larger than the viewport, just like ContentScale.None.
+    val preserveSourceSize = contentScale !in listOf(ContentScale.Fit, ContentScale.Crop, ContentScale.FillBounds,
+        ContentScale.FillWidth, ContentScale.FillHeight, ContentScale.Inside)
+    LaunchedEffect(request, width, height, imageLoader, state, preserveSourceSize) {
         if (width <= 0 || height <= 0) return@LaunchedEffect
         if (loadedRequest != request) {
             resource = null; state.clock = null; state.currentFrame = 0; drawTime = 0L
             state.loadState = SvgaLoadState.LOADING; state.error = null; state.downloadProgress = null
         }
         try {
-            resource = imageLoader.load(request.copy(width = request.width.takeIf { it > 0 } ?: width,
-                height = request.height.takeIf { it > 0 } ?: height)) { progress ->
+            resource = imageLoader.load(request.copy(width = if (preserveSourceSize) 0 else request.width.takeIf { it > 0 } ?: width,
+                height = if (preserveSourceSize) 0 else request.height.takeIf { it > 0 } ?: height)) { progress ->
                 withContext(Dispatchers.Main.immediate) {
                     state.downloadProgress = progress
                     request.onDownloadProgress?.invoke(progress)

@@ -28,6 +28,8 @@ class SvgaViewOptions {
     var cachePolicy = SvgaCachePolicy.ALL
     var memoryCache: Boolean? = null
     var weakMemoryCache: Boolean? = null
+    var bitmapConfig: android.graphics.Bitmap.Config? = null
+    var skipInvisibleImages: Boolean? = null
     var iterations = 0
     var autoPlay = true
     /** Display frame zero only, without preparing audio or starting a playback clock. */
@@ -54,6 +56,8 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
     private val view get() = checkNotNull(targetView)
     private var scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val loader = options.loader ?: SvgaImageLoader.get(view.context)
+    private val decodeDefaults = SvgaDecodeOptions.defaults
+    private val decodeScaleType = view.scaleType
     private var clock: SvgaPlayback? = null
     private var drawable: SVGADrawable? = null
     private var audio: SvgaAudioSession? = null
@@ -101,8 +105,13 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
                     height = requestSource.height.takeIf { it > 0 } ?: decodeHeight
                 ) else SvgaRequest(SvgaSource.from(requestSource), decodeWidth, decodeHeight, options.cachePolicy)
                 val request = baseRequest.copy(
+                    // CENTER draws at source scale even when its viewport is smaller.
+                    width = if (decodeScaleType == android.widget.ImageView.ScaleType.CENTER) 0 else baseRequest.width,
+                    height = if (decodeScaleType == android.widget.ImageView.ScaleType.CENTER) 0 else baseRequest.height,
                     memoryCache = options.memoryCache ?: baseRequest.memoryCache,
                     weakMemoryCache = options.weakMemoryCache ?: baseRequest.weakMemoryCache,
+                    bitmapConfig = options.bitmapConfig ?: baseRequest.bitmapConfig ?: decodeDefaults.bitmapConfig,
+                    skipInvisibleImages = options.skipInvisibleImages ?: baseRequest.skipInvisibleImages ?: decodeDefaults.skipInvisibleImages,
                 )
                 val loaded = loader.load(request) { progress ->
                     withContext(Dispatchers.Main.immediate) {
@@ -243,12 +252,15 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
         }
     }
     internal fun rebind(nextSource: Any, next: SvgaViewOptions): Boolean {
+        if (decodeDefaults != SvgaDecodeOptions.defaults) return false
+        if (!closed && decodeScaleType != view.scaleType) return false
         if (closed || failed || !next.reuseOnRebind || !options.reuseOnRebind || identity != requestIdentity(nextSource)) return false
         if ((nextSource as? SvgaRequest)?.refresh == true) return false
         if (options.loader !== next.loader || options.requestFactory !== next.requestFactory ||
             options.bindingsFactory !== next.bindingsFactory ||
             options.onResourceReady !== next.onResourceReady || options.useViewControls != next.useViewControls ||
             options.cachePolicy != next.cachePolicy || options.memoryCache != next.memoryCache || options.weakMemoryCache != next.weakMemoryCache ||
+            options.bitmapConfig != next.bitmapConfig || options.skipInvisibleImages != next.skipInvisibleImages ||
             options.iterations != next.iterations || options.autoPlay != next.autoPlay || options.staticImage != next.staticImage || options.speed != next.speed ||
             options.startFrame != next.startFrame || options.endFrame != next.endFrame || options.reverse != next.reverse ||
             options.hiddenBehavior != next.hiddenBehavior ||

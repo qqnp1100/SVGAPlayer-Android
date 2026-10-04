@@ -2,6 +2,58 @@
 
 该版本把下载、缓存、解码和播放实例分开。Android View 和原生 Compose 默认共用进程内的 `SvgaEngine`；同来源、兼容缓存策略的请求合并下载，同尺寸的资源准备进一步合并。Compose 直接绘制 Canvas，通过 `withFrameNanos` 驱动，不创建 Android View 或 Drawable。
 
+## Bitmap 解码与内存
+
+基础图片支持进程级默认配置和单次加载覆盖。建议在 Application 初始化时设置全局默认：
+
+```kotlin
+import android.graphics.Bitmap
+import com.opensource.svgaplayer.SvgaDecodeOptions
+
+SvgaDecodeOptions.defaults = SvgaDecodeOptions(
+    bitmapConfig = Bitmap.Config.RGB_565,
+    skipInvisibleImages = true,
+)
+```
+
+默认值为 `ARGB_8888`、`skipInvisibleImages = false`。配置对象不可变，整体赋值是线程安全的；每次加载捕获一次配置，修改全局默认不修改已经解码的资源。Compose 在下一次重组时读取新默认。
+
+```kotlin
+// 单次请求覆盖；null 继承全局默认。
+val request = SvgaRequest(url).copy(
+    bitmapConfig = Bitmap.Config.ARGB_8888,
+    skipInvisibleImages = false,
+)
+loader.load(request)
+
+// View：优先级为 View 显式配置 > SvgaRequest 配置 > 全局默认。
+svgaView.loadSvga(url) {
+    bitmapConfig = Bitmap.Config.RGB_565
+    skipInvisibleImages = true
+}
+
+// Compose 使用相同优先级。
+SvgaView(url, bitmapConfig = Bitmap.Config.ARGB_8888, skipInvisibleImages = true)
+```
+
+颜色配置支持 `ARGB_8888`、`RGB_565` 两种首选格式。`RGB_565` 只适用于无需透明通道的图片，会降低颜色精度；带透明通道的图片保留透明度，不能保证内存减半。其他格式会报参数错误。基础图片始终使用软件 Bitmap，以兼容遮罩绘制；业务动态图片仍由对应图片加载器决定格式。这些配置均进入强缓存、弱缓存和解码合并的身份；不同配置仍共享兼容的下载和磁盘缓存。
+
+图片采样按图层 layout、旋转/镜像/缩放矩阵，以及实际请求像素尺寸计算，合并同一图片所有可见帧和图层的最大需求。缩小变换不会再被固定为至少 1 倍。Android 28+ 使用 ImageDecoder 指定输出尺寸，旧系统使用 BitmapFactory 采样与密度缩放，避免只按 2 的幂采样造成的尺寸浪费。未知请求尺寸保留原图，不放大原图；非等比视口保守采用较大缩放比例。View 的 CENTER、Compose 的 None 和自定义 ContentScale 保留原图尺寸。
+
+开启 `skipInvisibleImages` 后，未使用图片、普通图层全程 alpha <= 0 的图片会跳过解码。判断覆盖素材整个时间轴，不因 `startFrame/endFrame`、动态 hidden 或替换图片裁剪资源，保持 seek、倒放、重播和动态填充的能力；matte 图片保守保留。过滤不会删除图层元数据或改变帧数。它减少解码分配和资源常驻像素，不是播放结束自动释放或按帧延迟加载。
+
+旧 Parser 产生的实体也使用全局默认；在 `onComplete` 中、交给 View 之前可设置该实体的配置：
+
+```kotlin
+videoItem.decodeOptions = SvgaDecodeOptions.defaults.copy(
+    bitmapConfig = Bitmap.Config.ARGB_8888,
+    skipInvisibleImages = false,
+)
+svgaView.setVideoItem(videoItem)
+```
+
+旧 Parser 的内置解码器使用相同尺寸优化。若业务通过 `SVGAParser.setBitmapDecoder` 接管解码，颜色与尺寸仍由业务解码器决定，库只应用不可见图片过滤。直接调用 `SvgaResource.decode` 可传 `decodeOptions`。基础资源像素预算仍先保守估算，再核对实际 `allocationByteCount`。
+
 ## 模块
 
 | 模块 | 本地发布 artifactId | 内容 |

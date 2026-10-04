@@ -57,8 +57,10 @@ class SvgaEngine(
 
     suspend fun acquire(request: SvgaRequest, onDownloadProgress: (suspend (SvgaDownloadProgress) -> Unit)? = request.onDownloadProgress): SvgaResource {
         val r = request.snapshot()
+        val decodeOptions = r.resolveDecodeOptions()
+        val decodeKey = "${r.width}:${r.height}:${decodeOptions.bitmapConfig.name}:${decodeOptions.skipInvisibleImages}"
         check(scope.isActive) { "Engine closed" }
-        val lookupKey = "${sourceIdentity(r)}:${r.width}:${r.height}"
+        val lookupKey = "${sourceIdentity(r)}:$decodeKey"
         val weakEnabled = weakMemoryCacheEnabled && r.usesWeakMemory
         if (r.refresh) memory.invalidate(sourceIdentity(r) + ":")
         if (!r.refresh) memory.find(lookupKey, r.readsMemory, weakEnabled, r.cacheOnly)?.let { hit ->
@@ -67,7 +69,7 @@ class SvgaEngine(
             return hit.value
         }
         return sources.useWithProgress(sourceKey(r), onDownloadProgress, { progress -> downloads.withPermit { source(r, progress) } }) { source ->
-            val key = "${sourceIdentity(r)}:${source.digest}:${r.width}:${r.height}"
+            val key = "${sourceIdentity(r)}:${source.digest}:$decodeKey"
             val hit = if (source.reusable && !r.refresh) memory.findKey(key, r.readsMemory, weakEnabled) else null
             if (hit != null) {
                 if (hit.weak) weakMemoryHits.incrementAndGet() else memoryHits.incrementAndGet()
@@ -80,7 +82,7 @@ class SvgaEngine(
                         val dir = File(staging, java.util.UUID.randomUUID().toString()).apply { mkdirs() }
                         try {
                             decodeCount.incrementAndGet()
-                            val resource = source.file.inputStream().use { SvgaResource.decode(it, dir, r.width, r.height, maxDecodedBytes) }
+                            val resource = source.file.inputStream().use { SvgaResource.decode(it, dir, r.width, r.height, maxDecodedBytes, decodeOptions) }
                             source.publish()
                             resource
                         } finally { dir.deleteRecursively() }

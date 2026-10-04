@@ -1,5 +1,7 @@
 package com.opensource.svgaplayer.loader
 
+import android.graphics.Bitmap
+import com.opensource.svgaplayer.SvgaDecodeOptions
 import java.io.File
 import java.net.URI
 
@@ -48,10 +50,15 @@ data class SvgaRequest(
     val memoryCache: Boolean? = null,
     /** Weak index override, independent of the strong LRU. Null inherits cachePolicy.memory. */
     val weakMemoryCache: Boolean? = null,
+    /** Null inherits SvgaDecodeOptions.defaults at load time. */
+    val bitmapConfig: Bitmap.Config? = null,
+    val skipInvisibleImages: Boolean? = null,
 ) {
     init { require(width >= 0 && height >= 0); require(!(cacheOnly && refresh)) }
     constructor(source: Any) : this(SvgaSource.from(source))
     internal fun snapshot() = copy(headers = headers.toSortedMap().toMap())
+    fun resolveDecodeOptions(defaults: SvgaDecodeOptions = SvgaDecodeOptions.defaults) = SvgaDecodeOptions(
+        bitmapConfig ?: defaults.bitmapConfig, skipInvisibleImages ?: defaults.skipInvisibleImages)
     val readsMemory get() = memoryRead ?: memoryCache ?: cachePolicy.memory
     val writesMemory get() = memoryWrite ?: memoryCache ?: cachePolicy.memory
     val usesWeakMemory get() = weakMemoryCache ?: cachePolicy.memory

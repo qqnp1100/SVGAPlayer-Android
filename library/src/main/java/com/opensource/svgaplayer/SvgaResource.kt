@@ -4,6 +4,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Path
 import android.widget.ImageView
+import com.opensource.svgaplayer.bitmap.SvgaImageDecoder
+import com.opensource.svgaplayer.bitmap.SvgaImageSize
 import com.opensource.svgaplayer.drawer.SVGACanvasDrawer
 import com.opensource.svgaplayer.proto.MovieEntity
 import kotlinx.coroutines.currentCoroutineContext
@@ -38,7 +40,8 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
 
         /** Caller supplies a private staging directory, which may be removed after this returns. */
         suspend fun decode(input: InputStream, directory: File, width: Int = 0, height: Int = 0,
-            maxDecodedBytes: Long = MAX_EXPANDED_BYTES): SvgaResource {
+            maxDecodedBytes: Long = MAX_EXPANDED_BYTES,
+            decodeOptions: SvgaDecodeOptions = SvgaDecodeOptions.defaults): SvgaResource {
             val job = currentCoroutineContext()
             fun bounded(stream: InputStream, limit: Long) = object : FilterInputStream(stream) {
                 var total = 0L
@@ -93,10 +96,16 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
             val images = video.movieItem?.images.orEmpty()
             val audioKeys = video.movieItem?.audios.orEmpty().mapNotNull { it.audioKey }.toSet()
             val keys = if (json != null) json.keys().asSequence().toList() else images.keys.toList()
+            val usage = video.imageUsage()
+            job.ensureActive()
+            val viewportScale = if (width > 0 && height > 0)
+                maxOf(width / video.videoSize.width, height / video.videoSize.height) else Double.NaN
             var pixels = 0L
             for (key in keys) {
                 job.ensureActive()
                 if (key in audioKeys) continue
+                val imageUsage = usage[key.removeSuffix(".matte")]
+                if (decodeOptions.skipInvisibleImages && imageUsage?.hasVisibleFrame != true) continue
                 val bytes = images[key]?.toByteArray()
                 fun imageFile(name: String): File {
                     val file = listOf(name, "$name.png", "$key.png").map { File(directory, it).canonicalFile }
@@ -111,19 +120,19 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                     file = imageFile(bytes.toString(Charsets.UTF_8)); BitmapFactory.decodeFile(file.path, opts)
                 }
                 require(opts.outWidth > 0 && opts.outHeight > 0) { "Invalid image $key" }
-                val scale = video.scaleMap[key] ?: (1f to 1f)
-                val target = if (width > 0 && height > 0) maxOf(
-                    width / video.videoSize.width * scale.first,
-                    height / video.videoSize.height * scale.second).coerceAtMost(1.0) else 1.0
-                opts.inJustDecodeBounds = false
-                opts.inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-                opts.inSampleSize = 1
-                while (1.0 / (opts.inSampleSize * 2) >= target && opts.inSampleSize < 1024) opts.inSampleSize *= 2
-                pixels += (opts.outWidth.toLong() / opts.inSampleSize) * (opts.outHeight / opts.inSampleSize) * 4
-                require(pixels <= maxDecodedBytes) { "Decoded image budget exceeded" }
-                val bitmap = if (file != null) BitmapFactory.decodeFile(file.path, opts)
-                    else BitmapFactory.decodeByteArray(bytes!!, 0, bytes.size, opts)
-                video.imageMap[key.removeSuffix(".matte")] = requireNotNull(bitmap) { "Cannot decode $key" }.apply { prepareToDraw() }
+                val target = SvgaImageSize.target(imageUsage, opts.outWidth, opts.outHeight, viewportScale)
+                // RGB_565 is a preference: alpha images can still require four bytes per pixel.
+                require(target.first.toLong() <= (maxDecodedBytes - pixels) / 4 / target.second) {
+                    "Decoded image budget exceeded"
+                }
+                val bitmap = requireNotNull(SvgaImageDecoder.decode(file, bytes, opts.outWidth, opts.outHeight,
+                    target.first, target.second, decodeOptions)) { "Cannot decode $key" }
+                if (bitmap.allocationByteCount.toLong() > maxDecodedBytes - pixels) {
+                    bitmap.recycle()
+                    error("Decoded image budget exceeded")
+                }
+                pixels += bitmap.allocationByteCount
+                video.imageMap[key.removeSuffix(".matte")] = bitmap.apply { prepareToDraw() }
             }
             val scratch = Path()
             video.spriteList.forEach { sprite -> sprite.frames.forEach { frame ->
