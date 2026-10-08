@@ -45,19 +45,23 @@ open class SVGAImageView @JvmOverloads constructor(
         Clear,
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaState.isPlaying in Compose; control View playback with SvgaViewHandle.")
     var isAnimating = false
         internal set
 
+    @Deprecated("Deprecated since 3.0.0. Set iterations in loadSvga or SvgaView; useViewControls retains this legacy setting.")
     var loops = 0
 
     @Deprecated(
-        "It is recommended to use clearAfterDetached, or manually call to SVGAVideoEntity#clear." +
-                "If you just consider cleaning up the canvas after playing, you can use FillMode#Clear.",
+        "Deprecated. Use clearSvga or SvgaViewHandle.cancel to cancel loading and clear playback.",
         level = DeprecationLevel.WARNING
     )
     var clearsAfterStop = false
+    @Deprecated("Deprecated since 3.0.0. loadSvga releases its presentation automatically on detach; use restartOnAttach to reload.")
     var clearsAfterDetached = false
+    @Deprecated("Deprecated since 3.0.0. Modern playback retains the final frame; use clearSvga to clear it or useViewControls for legacy fill modes.")
     var fillMode: FillMode = FillMode.Forward
+    @Deprecated("Deprecated since 3.0.0. Set onReady/onFinished/onError in loadSvga; use SvgaState for Compose playback state.")
     var callback: SVGACallback? = null
 
     private var modernPlayback: SvgaLegacyViewSession? = null
@@ -75,6 +79,7 @@ open class SVGAImageView @JvmOverloads constructor(
         getSVGADrawable()?.invalidateSelf()
     }
 
+    @Deprecated("Deprecated since 3.0.0. Set onReady in loadSvga or SvgaView to observe fully prepared resources.")
     var parserImagesEndCallBack: (() -> Unit)? = null
 
     internal class CloseableCoroutineScope(context: CoroutineContext) : Closeable, CoroutineScope {
@@ -91,6 +96,7 @@ open class SVGAImageView @JvmOverloads constructor(
     private var isViewVisible = true
     private var isRectVisible = true
     private var isAddOnPreDraw = false
+    @Deprecated("Deprecated since 3.0.0. Set hiddenBehavior in loadSvga or SvgaView.")
     var pauseWhenHide = true
     private val visibleRect = Rect()
     private var lastRectVisibleCheckUptimeMillis = 0L
@@ -164,10 +170,12 @@ open class SVGAImageView @JvmOverloads constructor(
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use loadSvga autoPlay, or SvgaViewHandle.resume/replay.")
     fun startAnimation() {
         startAnimation(null, false)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Set startFrame/endFrame/reverse in loadSvga and control playback with SvgaViewHandle.")
     fun startAnimation(range: SVGARange?, reverse: Boolean = false) {
         modernSession()?.let { it.start(range, reverse); return }
         stopAnimation(false)
@@ -296,6 +304,7 @@ open class SVGAImageView @JvmOverloads constructor(
         callback?.onFinished()
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use clearSvga or SvgaViewHandle.cancel to cancel loading and clear playback.")
     fun clear() {
         modernPlayback?.close(); modernPlayback = null
         getSVGADrawable()?.cleared = true
@@ -304,6 +313,7 @@ open class SVGAImageView @JvmOverloads constructor(
         setImageDrawable(null)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.pause or SvgaState.pause.")
     fun pauseAnimation() {
         stopAnimation(false)
         callback?.onPause()
@@ -315,10 +325,12 @@ open class SVGAImageView @JvmOverloads constructor(
         startAnimation()
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.pause, or clearSvga to cancel loading and clear playback.")
     fun stopAnimation() {
         stopAnimation(clear = clearsAfterStop)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.pause, or clearSvga to cancel loading and clear playback.")
     fun stopAnimation(clear: Boolean) {
         modernPlayback?.let { it.pause(); getSVGADrawable()?.cleared = clear; return }
         mAnimator?.cancel()
@@ -348,10 +360,12 @@ open class SVGAImageView @JvmOverloads constructor(
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use loadSvga to load and bind resources; useViewControls retains manual entity binding.")
     fun setVideoItem(videoItem: SVGAVideoEntity?) {
         setVideoItem(videoItem, SVGADynamicEntity())
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use loadSvga with SvgaBindings, or SvgaViewHandle.updateBindings for dynamic updates.")
     fun setVideoItem(videoItem: SVGAVideoEntity?, dynamicItem: SVGADynamicEntity?) {
         if (videoItem == null) {
             setImageDrawable(null)
@@ -363,10 +377,12 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     //静止的
+    @Deprecated("Deprecated since 3.0.0. Use loadSvga with staticImage = true.")
     fun setStaticVideoItem(videoItem: SVGAVideoEntity?) {
         setStaticVideoItem(videoItem, SVGADynamicEntity())
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use loadSvga with staticImage = true and SvgaBindings.")
     fun setStaticVideoItem(
         videoItem: SVGAVideoEntity?,
         dynamicItem: SVGADynamicEntity?,
@@ -429,6 +445,7 @@ open class SVGAImageView @JvmOverloads constructor(
         return modernPlayback ?: SvgaLegacyViewSession(this, drawable, resource).also { modernPlayback = it }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.seekToProgress and pause/resume; use SvgaPlayback.seekFrame for a custom renderer.")
     fun stepToFrame(frame: Int, andPlay: Boolean) {
         modernSession()?.let { it.seek(frame, andPlay); return }
         pauseAnimation()
@@ -445,6 +462,7 @@ open class SVGAImageView @JvmOverloads constructor(
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.seekToProgress and pause/resume, or the corresponding SvgaState methods.")
     fun stepToPercentage(percentage: Double, andPlay: Boolean) {
         val drawable = drawable as? SVGADrawable ?: return
         var frame = (drawable.videoItem.frames * percentage).toInt()
@@ -454,6 +472,7 @@ open class SVGAImageView @JvmOverloads constructor(
         stepToFrame(frame, andPlay)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Retained for legacy View click areas; Compose supports SvgaView.onLayerClick.")
     fun setOnAnimKeyClickListener(clickListener: SVGAClickAreaListener) {
         mItemClickAreaListener = clickListener
     }

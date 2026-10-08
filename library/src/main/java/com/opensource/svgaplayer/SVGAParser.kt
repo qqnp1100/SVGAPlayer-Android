@@ -43,6 +43,7 @@ private const val MAX_INFLATED_BYTES = 128 * 1024 * 1024
 private const val MAX_ZIP_ENTRY_BYTES = 64 * 1024 * 1024
 private val unzipLocks = Array(64) { Any() }
 
+@Deprecated("Deprecated since 3.0.0. Use SvgaImageLoader.load, SvgaEngine.acquire or SVGAImageView.loadSvga.")
 class SVGAParser(context: Context?) {
     private var mContext = context?.applicationContext
 
@@ -56,19 +57,24 @@ class SVGAParser(context: Context?) {
     @Volatile
     private var mFrameHeight: Int = 0
 
+    @Deprecated("Deprecated since 3.0.0. Use the result of SvgaImageLoader.load or loadSvga onReady/onError callbacks.")
     interface ParseCompletion {
         fun onComplete(videoItem: SVGAVideoEntity)
         fun onError()
     }
 
+    @Deprecated("Deprecated since 3.0.0. Modern loaders prepare instance audio automatically; use SvgaAudioSession for custom playback.")
     interface PlayCallback {
         fun onPlay(file: List<File>)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Configure the OkHttpClient supplied to SvgaEngine instead.")
     open class FileDownloader {
 
+        @Deprecated("Deprecated since 3.0.0. Use SvgaRequest.cachePolicy, diskRead and diskWrite.")
         var noCache = false
 
+        @Deprecated("Deprecated since 3.0.0. Use SvgaEngine.acquire with SvgaSource.Remote; cancel its loading coroutine to cancel the request.")
         open fun resume(
             url: URL,
             complete: (bytes: ByteArray) -> Unit,
@@ -157,8 +163,10 @@ class SVGAParser(context: Context?) {
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Configure the OkHttpClient supplied to SvgaEngine instead.")
     var fileDownloader = FileDownloader()
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaDecodeOptions or SvgaRequest bitmap configuration instead.")
     interface BitmapDecoder {
         /**
          * @param scaleX      图片显示中最大的缩放
@@ -201,10 +209,12 @@ class SVGAParser(context: Context?) {
         fun onClean(bitmap: Bitmap)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaBindings.Builder.image and the ImageLoader from SvgaImageLoader.")
     interface CustomDynamicImageLoad {
         suspend fun loadImage(imageView: ImageView, url: String, forKey: String): Bitmap?
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaBindings.Builder.image and Coil image decoders.")
     interface CustomDynamicImageLoadWithData : CustomDynamicImageLoad {
         suspend fun loadImageData(imageView: ImageView, url: String, forKey: String): ByteArray?
     }
@@ -215,7 +225,9 @@ class SVGAParser(context: Context?) {
         private val threadNum = AtomicInteger(0)
         private var mShareParser = SVGAParser(null)
         private val handler: Handler by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { Handler(Looper.getMainLooper()!!) }
+        @Deprecated("Deprecated since 3.0.0. Use Dispatchers.Main for main-thread callbacks.")
         fun handler(): Handler = handler
+        @Deprecated("Deprecated since 3.0.0. Use SvgaBindings.Builder.image and the ImageLoader from SvgaImageLoader.")
         var customDynamicImageLoad: CustomDynamicImageLoad? = null
         private val defaultBitmapDecoder: BitmapDecoder = object : BitmapDecoder {
             override fun onLoad(
@@ -290,34 +302,41 @@ class SVGAParser(context: Context?) {
             }
         }
 
+        @Deprecated("Deprecated since 3.0.0. Configure SvgaEngine downloadConcurrency and decodeConcurrency instead.")
         fun setThreadPoolExecutor(executor: ThreadPoolExecutor) {
             threadPoolExecutor = executor
             coroutineDispatcher = threadPoolExecutor.asCoroutineDispatcher()
         }
 
+        @Deprecated("Deprecated since 3.0.0. Use SvgaImageLoader.get(context) or SvgaEngine.get(context).")
         fun shareParser(): SVGAParser {
             return mShareParser
         }
 
+        @Deprecated("Deprecated since 3.0.0. Use SvgaDecodeOptions.defaults or SvgaRequest bitmap configuration instead.")
         fun setBitmapDecoder(customBitmapDecoder: BitmapDecoder) {
             this.customBitmapDecoder = customBitmapDecoder
         }
 
+        @Deprecated("Deprecated since 3.0.0. Use SvgaDecodeOptions.defaults or the current SvgaRequest configuration instead.")
         fun getBitmapDecoder(): BitmapDecoder = customBitmapDecoder
 
 
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaImageLoader.get(context) or SvgaEngine.get(context); parser initialization is unnecessary.")
     fun init(context: Context) {
         mContext = context.applicationContext
         SVGACache.onCreate(mContext)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Set SvgaRequest.width/height or let loadSvga use the View size.")
     fun setFrameSize(frameWidth: Int, frameHeight: Int) {
         mFrameWidth = frameWidth
         mFrameHeight = frameHeight
     }
 
+    @Deprecated("Deprecated since 3.0.0. Load SvgaSource.Asset with SvgaImageLoader.load, SvgaEngine.acquire or loadSvga.")
     fun decodeFromAssets(
         name: String,
         callback: ParseCompletion?,
@@ -326,6 +345,7 @@ class SVGAParser(context: Context?) {
         decodeFromAssets(name, callback, playCallback, 0, 0)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Load SvgaSource.Asset with SvgaRequest.width/height or loadSvga.")
     fun decodeFromAssets(
         name: String,
         callback: ParseCompletion?,
@@ -356,6 +376,7 @@ class SVGAParser(context: Context?) {
 
     }
 
+    @Deprecated("Deprecated since 3.0.0. Load SvgaSource.Remote with SvgaImageLoader.load, SvgaEngine.acquire or loadSvga.")
     fun decodeFromURL(
         url: URL,
         callback: ParseCompletion?,
@@ -364,6 +385,7 @@ class SVGAParser(context: Context?) {
         return decodeFromURL(url, callback, playCallback, 0, 0)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Load SvgaSource.Remote with SvgaRequest.width/height or loadSvga.")
     fun decodeFromURL(
         url: URL,
         callback: ParseCompletion?,
@@ -410,6 +432,7 @@ class SVGAParser(context: Context?) {
     /**
      * 读取解析本地缓存的 svga 文件.
      */
+    @Deprecated("Deprecated since 3.0.0. Use SvgaRequest(cacheOnly = true) with the original source; legacy cache keys are not shared with SvgaEngine.")
     fun decodeFromSVGAFileCacheKey(
         cacheKey: String,
         callback: ParseCompletion?,
@@ -448,6 +471,7 @@ class SVGAParser(context: Context?) {
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Decode a ByteArrayInputStream with SvgaResource.decode, or load a SvgaSource.LocalFile.")
     fun decodeFromBytes(
         bytes: ByteArray,
         cacheKey: String,
@@ -486,6 +510,7 @@ class SVGAParser(context: Context?) {
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaResource.decode for an InputStream, or load a SvgaSource.LocalFile.")
     fun decodeFromInputStream(
         inputStream: InputStream,
         cacheKey: String,
@@ -531,6 +556,7 @@ class SVGAParser(context: Context?) {
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Load SvgaSource.LocalFile with SvgaImageLoader.load, SvgaEngine.acquire or loadSvga.")
     fun decodeFromFile(
         path: String,
         cacheKey: String,
@@ -576,8 +602,7 @@ class SVGAParser(context: Context?) {
      * @deprecated from 2.4.0
      */
     @Deprecated(
-        "This method has been deprecated from 2.4.0.",
-        ReplaceWith("this.decodeFromAssets(assetsName, callback)")
+        "Deprecated since 2.4.0. Use a 3.0.0 loader with SvgaSource.Asset instead."
     )
     fun parse(assetsName: String, callback: ParseCompletion?) {
         this.decodeFromAssets(assetsName, callback, null)
@@ -587,8 +612,7 @@ class SVGAParser(context: Context?) {
      * @deprecated from 2.4.0
      */
     @Deprecated(
-        "This method has been deprecated from 2.4.0.",
-        ReplaceWith("this.decodeFromURL(url, callback)")
+        "Deprecated since 2.4.0. Use a 3.0.0 loader with SvgaSource.Remote instead."
     )
     fun parse(url: URL, callback: ParseCompletion?) {
         this.decodeFromURL(url, callback, null)
@@ -598,8 +622,7 @@ class SVGAParser(context: Context?) {
      * @deprecated from 2.4.0
      */
     @Deprecated(
-        "This method has been deprecated from 2.4.0.",
-        ReplaceWith("this.decodeFromInputStream(inputStream, cacheKey, callback, closeInputStream)")
+        "Deprecated since 2.4.0. Use SvgaResource.decode for InputStream decoding in 3.0.0."
     )
     fun parse(
         inputStream: InputStream,

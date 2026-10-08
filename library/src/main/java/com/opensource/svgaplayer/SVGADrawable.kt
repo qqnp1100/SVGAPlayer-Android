@@ -170,6 +170,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.resume or SvgaState.resume; custom renderers own a SvgaAudioSession.")
     fun resume() {
         videoItem.audioList.forEach { audio ->
             audio.playIDs?.map {
@@ -182,6 +183,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.pause or SvgaState.pause; custom renderers own a SvgaAudioSession.")
     fun pause() {
         videoItem.audioList.forEach { audio ->
             audio.playIDs?.map {
@@ -194,6 +196,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.cancel or clearSvga; custom renderers close their SvgaAudioSession.")
     fun stop() {
         videoItem.audioList.forEach { audio ->
             audio.playIDs?.map {

@@ -9,7 +9,9 @@ import java.security.MessageDigest
 /**
  * SVGA 缓存管理
  */
+@Deprecated("Deprecated since 3.0.0. Configure caching with SvgaEngine and SvgaRequest.cachePolicy.")
 object SVGACache {
+    @Deprecated("Deprecated since 3.0.0. Use SvgaCachePolicy on each SvgaRequest.")
     enum class Type {
         DEFAULT,
         FILE
@@ -29,10 +31,12 @@ object SVGACache {
         }
 
 
+    @Deprecated("Deprecated since 3.0.0. SvgaEngine initializes its cache automatically.")
     fun onCreate(context: Context?) {
         onCreate(context, Type.DEFAULT)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaRequest.cachePolicy; SvgaEngine initializes its cache automatically.")
     fun onCreate(context: Context?, type: Type) {
         if (isInitialized()) return
         context ?: return
@@ -44,6 +48,7 @@ object SVGACache {
     /**
      * 清理缓存
      */
+    @Deprecated("Deprecated since 3.0.0. Use SvgaEngine.clearMemory and clearDisk; legacy and modern cache directories are separate.")
     fun clearCache() {
         if (!isInitialized()) {
             LogUtils.error(TAG, "SVGACache is not init!")
@@ -75,18 +80,22 @@ object SVGACache {
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. SvgaEngine initializes its cache automatically.")
     fun isInitialized(): Boolean {
         return "/" != cacheDir && File(cacheDir).exists()
     }
 
+    @Deprecated("Deprecated since 3.0.0. Read the cachePolicy of your SvgaRequest instead.")
     fun isDefaultCache(): Boolean = type == Type.DEFAULT
 
+    @Deprecated("Deprecated since 3.0.0. Load a SvgaRequest with cacheOnly = true to query the modern cache.")
     fun isCached(cacheKey: String): Boolean {
         val directory = buildCacheDir(cacheKey)
         return buildSvgaFile(cacheKey).isFile || (File(directory, ".complete").isFile &&
             (File(directory, "movie.binary").isFile || File(directory, "movie.spec").isFile))
     }
 
+    @Deprecated("Deprecated since 3.0.0. SvgaEngine manages cache identities from SvgaRequest automatically.")
     fun buildCacheKey(str: String): String {
         val messageDigest = MessageDigest.getInstance("MD5")
         messageDigest.update(str.toByteArray(charset("UTF-8")))
@@ -98,16 +107,20 @@ object SVGACache {
         return sb
     }
 
+    @Deprecated("Deprecated since 3.0.0. SvgaEngine manages cache identities from SvgaRequest automatically.")
     fun buildCacheKey(url: URL): String = buildCacheKey(url.toString())
 
+    @Deprecated("Deprecated since 3.0.0. SvgaEngine manages cache files automatically; these paths refer only to the legacy cache.")
     fun buildCacheDir(cacheKey: String): File {
         return File("$cacheDir$cacheKey/")
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaSource.LocalFile for local files; SvgaEngine manages its own cache files.")
     fun buildSvgaFile(cacheKey: String): File {
         return File("$cacheDir$cacheKey.svga")
     }
 
+    @Deprecated("Deprecated since 3.0.0. Audio files are managed by each SvgaAudioSession.")
     fun buildAudioFile(audio: String): File {
         return File("$cacheDir$audio.mp3")
     }

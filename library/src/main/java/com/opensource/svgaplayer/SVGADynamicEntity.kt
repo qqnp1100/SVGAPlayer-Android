@@ -58,6 +58,7 @@ class SVGADynamicEntity {
     internal var isTextDirty = false
 
 
+    @Deprecated("Deprecated since 3.0.0. Set scrollSpacing in SvgaBindings.Builder.text or spacing in textScroll.")
     var srcollTextSpace = 10f
     @Volatile
     private var isClean = false
@@ -65,10 +66,12 @@ class SVGADynamicEntity {
     private var isLoad = false
     private var imageGeneration = 0L
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaBindings.Builder.hidden and SvgaViewHandle.updateBindings for updates.")
     fun setHidden(value: Boolean, forKey: String) {
         this.dynamicHidden.put(forKey, value)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaBindings.Builder.image(key, bitmap).")
     @Synchronized fun setDynamicImage(bitmap: Bitmap, forKey: String) {
         this.isClean = false
         replaceBitmap(forKey, bitmap, dynamicOutImage, ownedByLibrary = false)
@@ -82,6 +85,7 @@ class SVGADynamicEntity {
         return dynamicInAnimatedImage[key] ?: dynamicOutAnimatedImage[key]
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaBindings.Builder.image(key, source) with Coil image decoding.")
     @Synchronized fun setDynamicImage(data: ByteArray, forKey: String) {
         this.isClean = false
         SVGADynamicImage.decode(data)?.let {
@@ -95,14 +99,17 @@ class SVGADynamicEntity {
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Legacy animated-image binding is retained for compatibility.")
     fun setDynamicGif(data: ByteArray, forKey: String) {
         setDynamicImage(data, forKey)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Legacy animated-image binding is retained for compatibility.")
     fun setDynamicWebp(data: ByteArray, forKey: String) {
         setDynamicImage(data, forKey)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaBindings.Builder.image(key, source) with SvgaImageLoader.")
     @Synchronized fun setDynamicImage(url: String, forKey: String) {
         this.isClean = false
         dynamicOutImageKeyUrl[forKey] = url
@@ -110,6 +117,7 @@ class SVGADynamicEntity {
 
     private val imageLoadMutex = Mutex()
 
+    @Deprecated("Deprecated since 3.0.0. loadSvga/SvgaView prepare SvgaBindings automatically; use SvgaBindings.prepare for custom rendering.")
     suspend fun requestDynamicImage(imageView: ImageView) = imageLoadMutex.withLock {
         try { requestDynamicImageLocked(imageView) }
         catch (e: Throwable) { isLoad = false; throw e }
@@ -256,21 +264,25 @@ class SVGADynamicEntity {
     /**
      * @speed 我也不知道是什么单位，反正速度能统一，大家伙看着设吧
      */
+    @Deprecated("Deprecated since 3.0.0. Set scrollPixelsPerSecond in SvgaBindings.Builder.text or use textScroll.")
     fun setDynamicTextScrollSpeed(forKey: String, speed: Float) {
         this.dynamicScrollTextSpeed.put(forKey, speed)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaBindings.Builder.text(key, value, paint).")
     fun setDynamicText(text: String, textPaint: TextPaint, forKey: String) {
         this.isTextDirty = true
         this.dynamicText.put(forKey, text)
         this.dynamicTextPaint.put(forKey, textPaint)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaBindings.Builder.text(key, layout).")
     fun setDynamicText(layoutText: StaticLayout, forKey: String) {
         this.isTextDirty = true
         this.dynamicStaticLayoutText.put(forKey, layoutText)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaBindings.Builder.text with text and paint, or a StaticLayout.")
     fun setDynamicText(layoutText: BoringLayout, forKey: String) {
         this.isTextDirty = true
         BoringLayout.isBoring(layoutText.text, layoutText.paint)?.let {
@@ -278,10 +290,12 @@ class SVGADynamicEntity {
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Legacy custom drawing is retained for compatibility; SvgaBindings has no custom-drawer equivalent.")
     fun setDynamicDrawer(drawer: (canvas: Canvas, frameIndex: Int) -> Boolean, forKey: String) {
         this.dynamicDrawer.put(forKey, drawer)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Retained for legacy View click areas; Compose supports SvgaView.onLayerClick.")
     fun setClickArea(clickKey: List<String>) {
         for (itemKey in clickKey) {
             dynamicIClickArea.put(itemKey, object : IClickAreaListener {
@@ -303,6 +317,7 @@ class SVGADynamicEntity {
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Retained for legacy View click areas; Compose supports SvgaView.onLayerClick.")
     fun setClickArea(clickKey: String) {
         dynamicIClickArea.put(clickKey, object : IClickAreaListener {
             override fun onResponseArea(key: String, x0: Int, y0: Int, x1: Int, y1: Int) {
@@ -322,6 +337,7 @@ class SVGADynamicEntity {
         })
     }
 
+    @Deprecated("Deprecated since 3.0.0. Legacy custom drawing is retained for compatibility; SvgaBindings has no custom-drawer equivalent.")
     fun setDynamicDrawerSized(
         drawer: (canvas: Canvas, frameIndex: Int, width: Int, height: Int) -> Boolean,
         forKey: String,

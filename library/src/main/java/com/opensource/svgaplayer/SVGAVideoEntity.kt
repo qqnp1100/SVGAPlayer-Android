@@ -97,8 +97,10 @@ class SVGAVideoEntity {
         sharesResources = true
     }
 
+    @Deprecated("Deprecated since 3.0.0. Load or decode a SvgaResource, then call newVideoEntity for a presentation.")
     constructor(json: JSONObject, cacheDir: File) : this(json, cacheDir, 0, 0)
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaResource.decode or SvgaRequest.width/height, then resource.newVideoEntity.")
     constructor(json: JSONObject, cacheDir: File, frameWidth: Int, frameHeight: Int) {
         mFrameWidth = frameWidth
         mFrameHeight = frameHeight
@@ -119,8 +121,10 @@ class SVGAVideoEntity {
         frames = movieObject.optInt("frames", 0)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Load or decode a SvgaResource, then call newVideoEntity for a presentation.")
     constructor(entity: MovieEntity, cacheDir: File) : this(entity, cacheDir, 0, 0)
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaResource.decode or SvgaRequest.width/height, then resource.newVideoEntity.")
     constructor(entity: MovieEntity, cacheDir: File, frameWidth: Int, frameHeight: Int) {
         this.mFrameWidth = frameWidth
         this.mFrameHeight = frameHeight
@@ -137,6 +141,7 @@ class SVGAVideoEntity {
 
     internal fun bitmap(key: String): Bitmap? = imageMap[key] ?: deferredImages?.bitmap(key)
 
+    @Deprecated("Deprecated since 3.0.0. Modern loaders decode and prepare SvgaResource images before returning.")
     public suspend fun parserImages(view: View) {
         synchronized(imageMap) {
             if (isParser || isClean) return

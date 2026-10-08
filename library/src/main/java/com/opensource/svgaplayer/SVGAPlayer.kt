@@ -7,7 +7,7 @@ import android.util.AttributeSet
  * Created by cuiminghui on 2017/3/30.
  * @deprecated from 2.4.0
  */
-@Deprecated("This class has been deprecated from 2.4.0. We don't recommend you to use it.")
+@Deprecated("Deprecated since 2.4.0. Use SVGAImageView with loadSvga, or the Compose SvgaView component.")
 class SVGAPlayer: SVGAImageView {
 
     constructor(context: Context) : super(context) {}
