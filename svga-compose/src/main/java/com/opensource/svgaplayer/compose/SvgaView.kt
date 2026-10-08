@@ -108,8 +108,12 @@ fun SvgaView(
     var size by remember { mutableStateOf(IntSize.Zero) }
     var decodeSize by remember(request) { mutableStateOf(IntSize.Zero) }
     var loadedRequest by remember { mutableStateOf<SvgaRequest?>(null) }
+    var loadedSize by remember { mutableStateOf(IntSize.Zero) }
     var resource by remember { mutableStateOf<SvgaResource?>(null) }
     var renderer by remember { mutableStateOf<SvgaRenderer?>(null) }
+    var rendererResource by remember { mutableStateOf<SvgaResource?>(null) }
+    var presentationRequest by remember { mutableStateOf<SvgaRequest?>(null) }
+    var presentationBindings by remember { mutableStateOf<SvgaBindings?>(null) }
     var audio by remember { mutableStateOf<SvgaAudioSession?>(null) }
     var drawTime by remember { mutableLongStateOf(0L) }
     val downloadCallback by rememberUpdatedState(onDownloadProgress)
@@ -121,7 +125,12 @@ fun SvgaView(
     val token = remember { Any() }
     DisposableEffect(state) {
         check(state.owner == null) { "A SvgaState can only drive one SvgaView" }; state.owner = token
-        onDispose { state.owner = null; state.clock = null }
+        onDispose {
+            renderer?.close(); audio?.close()
+            renderer = null; rendererResource = null; audio = null
+            presentationRequest = null; presentationBindings = null
+            state.owner = null; state.clock = null
+        }
     }
     // Only stable growth requests larger images. Shrinking reuses the prepared resource.
     LaunchedEffect(size, request) {
@@ -153,53 +162,73 @@ fun SvgaView(
                 }
             }
             loadedRequest = request
+            loadedSize = IntSize(width, height)
         } catch (e: CancellationException) { throw e }
         catch (e: Throwable) { state.error = e; state.loadState = SvgaLoadState.ERROR; errorCallback(e) }
     }
-    LaunchedEffect(resource, bindings, imageLoader, state, startFrame, endFrame, reverse) {
-        val loaded = resource ?: return@LaunchedEffect
+    // Preparation owns only unpublished objects. A size upgrade keeps the active presentation alive.
+    LaunchedEffect(resource, bindings, imageLoader, state, startFrame, endFrame, reverse, loadedSize, contentScale) {
+        val loaded = resource
+        if (loaded == null) {
+            renderer?.close(); audio?.close()
+            renderer = null; rendererResource = null; audio = null
+            presentationRequest = null; presentationBindings = null
+            return@LaunchedEffect
+        }
         var dynamic: SVGADynamicEntity? = null
         var sound: SvgaAudioSession? = null
         var drawing: SvgaRenderer? = null
         try {
-            dynamic = bindings.prepare(imageLoader.imageLoader, context, request.cachePolicy, loaded)
-            sound = SvgaAudioSession(context, loaded)
-            withContext(Dispatchers.IO) { sound.prepare() }
-            drawing = loaded.newRenderer(dynamic)
-            dynamic = null
             val preparedScale = contentScale.computeScaleFactor(Size(loaded.width.toFloat(), loaded.height.toFloat()),
-                Size(size.width.toFloat(), size.height.toFloat()))
+                Size(loadedSize.width.toFloat(), loadedSize.height.toFloat()))
             val preparedWidth = (loaded.width * preparedScale.scaleX).roundToInt().coerceAtLeast(1)
             val preparedHeight = (loaded.height * preparedScale.scaleY).roundToInt().coerceAtLeast(1)
+            dynamic = bindings.prepare(imageLoader.imageLoader, context, request.cachePolicy, loaded,
+                preparedWidth, preparedHeight)
+            val nextSound = audio.takeIf { presentationRequest == request } ?: SvgaAudioSession(context, loaded).also {
+                sound = it
+                withContext(Dispatchers.IO) { it.prepare() }
+            }
+            drawing = loaded.newRenderer(dynamic)
+            dynamic = null
             withContext(Dispatchers.Default) { drawing.prepare(preparedWidth, preparedHeight) }
-            renderer = drawing; audio = sound
-            if (state.clock == null || state.clock?.frames != loaded.frames || state.clock?.fps != loaded.fps ||
-                state.clock?.startFrame != startFrame || state.clock?.endFrame != (endFrame ?: loaded.frames - 1) || state.clock?.reverse != reverse) {
+            ensureActive()
+            val clockChanged = state.clock == null || state.clock?.frames != loaded.frames || state.clock?.fps != loaded.fps ||
+                state.clock?.startFrame != startFrame || state.clock?.endFrame != (endFrame ?: loaded.frames - 1) || state.clock?.reverse != reverse
+            val notifyReady = renderer == null || presentationRequest != request || presentationBindings !== bindings || clockChanged
+            if (clockChanged) {
+                nextSound.pause() // A changed frame range must seek reused players on the next tick.
                 state.clock = SvgaPlayback(loaded.frames, loaded.fps, startFrame, endFrame ?: loaded.frames - 1, reverse)
                 if (autoPlay) state.resume() else state.pause()
             }
-            state.loadState = SvgaLoadState.READY; readyCallback()
-            awaitCancellation()
+            val previousDrawing = renderer
+            val previousSound = audio
+            renderer = drawing; rendererResource = loaded; audio = nextSound
+            presentationRequest = request; presentationBindings = bindings
+            drawing = null; sound = null // Ownership transfers only after all preparation succeeds.
+            previousDrawing?.close()
+            if (previousSound !== nextSound) previousSound?.close()
+            state.error = null; state.loadState = SvgaLoadState.READY
+            if (notifyReady) readyCallback()
         } catch (e: CancellationException) { throw e }
         catch (e: Throwable) { state.error = e; state.loadState = SvgaLoadState.ERROR; errorCallback(e) }
         finally {
-            if (renderer === drawing) renderer = null
-            if (audio === sound) audio = null
             drawing?.close(); sound?.close(); dynamic?.clearDynamicObjects()
         }
     }
     val canPlay = visible && size.width > 0 && size.height > 0
-    LaunchedEffect(renderer, canPlay, lifecycle, iterations, state, hiddenBehavior, speed, state.revision) {
-        val drawing = renderer ?: return@LaunchedEffect
+    LaunchedEffect(renderer != null, canPlay, lifecycle, iterations, state, hiddenBehavior, speed, state.revision,
+        startFrame, endFrame, reverse) {
+        if (renderer == null) return@LaunchedEffect
         if (!canPlay) {
             if (hiddenBehavior != SvgaHiddenBehavior.CONTINUE_TIMELINE) state.clock?.pause()
             if (hiddenBehavior == SvgaHiddenBehavior.STOP) state.pause()
-            audio?.pause(); drawing.pause(); return@LaunchedEffect
+            audio?.pause(); renderer?.pause(); return@LaunchedEffect
         }
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             try {
                 while (isActive) {
-                    if (!state.isPlaying) { state.clock?.pause(); audio?.pause(); drawing.pause()
+                    if (!state.isPlaying) { state.clock?.pause(); audio?.pause(); renderer?.pause()
                         snapshotFlow { state.isPlaying }.first { it }
                     }
                     withFrameNanos { now ->
@@ -208,7 +237,7 @@ fun SvgaView(
                         state.currentFrame = clock.frame
                         state.progress = clock.frame.toFloat() / (clock.frames - 1).coerceAtLeast(1)
                         state.completedIterations = clock.completedIterations
-                        if (drawing.hasActiveScrollingText) drawTime = clock.positionNanos
+                        if (renderer?.hasActiveScrollingText == true) drawTime = clock.positionNanos
                         audio?.advance(clock.frame, clock.completedIterations, speed, reverse)
                         if (done) { state.pause(); audio?.pause(); finishedCallback() }
                     }
@@ -216,7 +245,7 @@ fun SvgaView(
             } finally {
                 if (hiddenBehavior != SvgaHiddenBehavior.CONTINUE_TIMELINE) state.clock?.pause()
                 if (hiddenBehavior == SvgaHiddenBehavior.STOP) state.pause()
-                audio?.pause(); drawing.pause()
+                audio?.pause(); renderer?.pause()
             }
         }
     }
@@ -226,7 +255,7 @@ fun SvgaView(
         if (contentDescription != null) this.contentDescription = contentDescription
     }) {
         Canvas(Modifier.matchParentSize()) {
-            val loaded = resource
+            val loaded = rendererResource
             val drawing = renderer
             state.revision // Seeking invalidates only drawing.
             val frame = state.currentFrame

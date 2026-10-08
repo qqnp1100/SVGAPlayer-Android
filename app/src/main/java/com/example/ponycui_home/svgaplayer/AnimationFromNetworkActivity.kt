@@ -24,7 +24,6 @@ class AnimationFromNetworkActivity : AppCompatActivity() {
     private fun loadAnimation() {
         try { // new URL needs try catch.
             val svgaParser = shareParser()
-            svgaParser.setFrameSize(100, 100)
             svgaParser.decodeFromURL(
                 URL("https://github.com/yyued/SVGA-Samples/blob/master/posche.svga?raw=true"),
                 object : ParseCompletion {

@@ -13,6 +13,7 @@ dependencies {
     api project(':svga-loader')
     api 'io.coil-kt.coil3:coil:3.3.0'
     implementation 'io.coil-kt.coil3:coil-network-okhttp:3.3.0'
+    implementation 'androidx.exifinterface:exifinterface:1.4.1'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test:runner:1.6.2'

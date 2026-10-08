@@ -2,9 +2,15 @@ package com.example.ponycui_home.svgaplayer
 
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.Lifecycle
 import com.opensource.svgaplayer.compose.*
@@ -17,6 +23,73 @@ import org.junit.Test
 
 class SvgaComposeTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun resizingKeepsTheCurrentFrameUntilNewBindingsAreReady() {
+        val context = compose.activity
+        val directory = java.io.File(context.cacheDir, "compose-resize-${java.util.UUID.randomUUID()}").apply { mkdirs() }
+        val server = okhttp3.mockwebserver.MockWebServer().apply { start() }
+        val engine = SvgaEngine(context)
+        val loader = SvgaImageLoader(context, engine)
+        val state = SvgaState()
+        var viewSize by mutableIntStateOf(120)
+        var show by mutableStateOf(true)
+        var readyCount = 0
+        fun png(color: Int): ByteArray {
+            val bitmap = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
+            try {
+                bitmap.eraseColor(color)
+                return java.io.ByteArrayOutputStream().also {
+                    assertTrue(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                }.toByteArray()
+            } finally { bitmap.recycle() }
+        }
+        val frame = org.json.JSONObject().put("alpha", 1.0)
+            .put("layout", org.json.JSONObject().put("width", 100).put("height", 100))
+            .put("transform", org.json.JSONObject().put("a", 1.0).put("d", 1.0))
+        val spec = org.json.JSONObject().put("movie", org.json.JSONObject().put("viewBox",
+            org.json.JSONObject().put("width", 100).put("height", 100)).put("fps", 20).put("frames", 200))
+            .put("images", org.json.JSONObject()).put("sprites", org.json.JSONArray().put(
+                org.json.JSONObject().put("imageKey", "avatar").put("frames",
+                    org.json.JSONArray().apply { repeat(200) { put(frame) } })))
+        val file = java.io.File(directory, "resize.svga")
+        java.util.zip.ZipOutputStream(file.outputStream()).use {
+            it.putNextEntry(java.util.zip.ZipEntry("movie.spec")); it.write(spec.toString().toByteArray()); it.closeEntry()
+        }
+        val bindings = svgaBindings { image("avatar", server.url("/avatar.png").toString()) }
+        fun centerPixel(): Color {
+            val image = compose.onNodeWithTag("resize-svga").captureToImage()
+            return image.toPixelMap()[image.width / 2, image.height / 2]
+        }
+        try {
+            server.enqueue(okhttp3.mockwebserver.MockResponse().setBody(okio.Buffer().write(png(android.graphics.Color.RED))))
+            server.enqueue(okhttp3.mockwebserver.MockResponse().setBody(okio.Buffer().write(png(android.graphics.Color.BLUE)))
+                .setBodyDelay(1, java.util.concurrent.TimeUnit.SECONDS))
+            compose.setContent {
+                if (show) SvgaView(file, Modifier.size(viewSize.dp).background(Color.Black).testTag("resize-svga"),
+                    state, bindings, cachePolicy = SvgaCachePolicy.NONE, loader = loader, onReady = { readyCount++ })
+            }
+            compose.waitUntil(20_000) { state.loadState == SvgaLoadState.READY }
+            assertEquals(Color.Red, centerPixel())
+            for (smaller in listOf(100, 90, 80)) {
+                compose.runOnUiThread { viewSize = smaller }
+                compose.waitForIdle()
+            }
+            Thread.sleep(250)
+            assertEquals("Shrinking must not request new bindings", 1, server.requestCount)
+            assertEquals(1, readyCount)
+            val previousFrame = state.currentFrame
+            compose.runOnUiThread { viewSize = 240 }
+            compose.waitUntil(10_000) { server.requestCount >= 2 }
+            assertEquals("Keep the old frame while the new image is loading", Color.Red, centerPixel())
+            compose.waitUntil(10_000) { state.currentFrame > previousFrame }
+            compose.waitUntil(10_000) { centerPixel() == Color.Blue }
+            assertEquals("A size upgrade must not fire onReady again", 1, readyCount)
+            assertNull(state.error)
+        } finally {
+            compose.runOnUiThread { show = false }; compose.waitForIdle()
+            loader.close(); engine.close(); server.shutdown(); directory.deleteRecursively()
+        }
+    }
 
     @Test fun deferredRequestUsesAnEagerResourceInCompose() {
         val state = SvgaState()

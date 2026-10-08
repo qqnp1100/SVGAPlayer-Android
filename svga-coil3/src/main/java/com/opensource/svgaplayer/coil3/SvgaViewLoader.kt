@@ -133,7 +133,8 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
                     val bind = options.onResourceReady
                     if (bind == null) {
                         val bindings = options.bindingsFactory?.invoke(loaded) ?: options.bindings
-                        val dynamic = bindings.prepare(loader.imageLoader, view.context, request.cachePolicy, loaded)
+                        val dynamic = bindings.prepare(loader.imageLoader, view.context, request.cachePolicy, loaded,
+                            view.width, view.height, view.scaleType)
                         pendingDynamic = dynamic
                         ensureActive()
                         view.setVideoItem(loaded.newVideoEntity(), dynamic)
@@ -160,7 +161,8 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
                 // An update during preparation must not publish an obsolete binding snapshot.
                 while (true) {
                     val bindings = options.bindingsFactory?.invoke(loaded) ?: options.bindings
-                    val dynamic = bindings.prepare(loader.imageLoader, view.context, bindingCache, loaded)
+                    val dynamic = bindings.prepare(loader.imageLoader, view.context, bindingCache, loaded,
+                        view.width, view.height, view.scaleType)
                     pendingDynamic = dynamic
                     ensureActive()
                     val candidate = SVGADrawable(loaded.newVideoEntity(), dynamic)
@@ -276,7 +278,8 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
         updateJob = scope.launch {
             var prepared: SVGADynamicEntity? = null
             try {
-                prepared = bindings.prepare(loader.imageLoader, view.context, bindingCache, resource)
+                prepared = bindings.prepare(loader.imageLoader, view.context, bindingCache, resource,
+                    view.width, view.height, view.scaleType)
                 if (closed || generation != version) return@launch
                 val resource = resource ?: return@launch
                 val old = drawable

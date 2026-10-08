@@ -20,7 +20,7 @@ import com.opensource.svgaplayer.compose.*
 class SvgaModernActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val urls = listOf("https://pic.vchat-onlie.com/head_bg_vip10.svga", "https://pic.vchat-onlie.com/head_bg_vip9.svga")
+        val urls = listOf("https://github.com/yyued/SVGA-Samples/blob/master/posche.svga?raw=true", "https://github.com/yyued/SVGA-Samples/blob/master/posche.svga?raw=true")
         if (intent.getBooleanExtra("view", false)) {
             val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xff202632.toInt()) }
             column.addView(TextView(this).apply { text = "Coil 3 · Android View"; setTextColor(-1) })

@@ -45,6 +45,12 @@ internal class SvgaImageSize {
         return maxOf(1, ceil(sourceWidth * scale).toInt()) to maxOf(1, ceil(sourceHeight * scale).toInt())
     }
 
+    /** Pixel dimensions of the displayed layer, independent of an image's intrinsic size. */
+    fun displayedSize(): Pair<Int, Int>? {
+        if (invalid || width <= 0 || height <= 0) return null
+        return ceil(width).toInt().coerceAtLeast(1) to ceil(height).toInt().coerceAtLeast(1)
+    }
+
     companion object {
         fun target(usage: SvgaImageSize?, sourceWidth: Int, sourceHeight: Int, viewportScale: Double): Pair<Int, Int> =
             (usage ?: SvgaImageSize().apply {

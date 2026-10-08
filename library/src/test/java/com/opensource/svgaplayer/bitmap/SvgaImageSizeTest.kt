@@ -4,6 +4,27 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SvgaImageSizeTest {
+    @Test fun displayedRegionMergesUsesRoundsUpAndIgnoresHiddenExpansion() {
+        val usage = SvgaImageSize()
+        usage.include(1000.0, 1000.0, 1.0, 0.0, 0.0, 1.0, visible = false)
+        usage.include(120.5, 60.5, .25, 0.0, 0.0, .25)
+        usage.include(40.0, 20.0, 0.0, -1.0, 1.0, 0.0)
+        usage.include(2000.0, 2000.0, 1.0, 0.0, 0.0, 1.0, visible = false)
+        assertEquals(40 to 20, usage.displayedSize())
+        usage.include(10.0, 100.1, 1.0, 0.0, 0.0, 1.0)
+        assertEquals(40 to 101, usage.displayedSize())
+    }
+
+    @Test fun displayedRegionRespectsRotatedAxesUnderNonUniformViewportScale() {
+        val usage = SvgaImageSize()
+        // A 90-degree rotation places layer width along the half-size viewport Y axis.
+        usage.include(40.0, 20.0, 0.0, 1.0, -2.0, 0.0)
+        assertEquals(40 to 40, usage.displayedSize())
+        assertEquals(null, SvgaImageSize().displayedSize())
+        usage.include(1.0, 1.0, Double.NaN, 0.0, 0.0, 1.0)
+        assertEquals(null, usage.displayedSize())
+    }
+
     @Test fun usesLayoutAndSubunitTransformWithoutPowerOfTwoRounding() {
         val usage = SvgaImageSize()
         usage.include(1200.0, 1200.0, .5, 0.0, 0.0, .5)

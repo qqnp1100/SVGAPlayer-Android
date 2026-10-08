@@ -87,7 +87,7 @@ val handle = svgaView.loadSvga(giftUrl) {
     iterations = 1 // 0 表示无限循环
     bindings = svgaBindings {
         text("user_name", "小明", textSizeSp = 16f)
-        image("avatar", avatarUrl, size = 128, circleCrop = true)
+        image("avatar", avatarUrl, circleCrop = true)
         hidden("debug_layer")
     }
     onReady = { /* 基础图片、填充和音频已准备 */ }
@@ -104,6 +104,8 @@ handle.cancel()
 ```
 
 `updateBindings` 替换该实例的整个填充快照，不重新请求基础资源。新快照准备完成后替换显示，旧请求取消；过期更新不能覆盖新结果。Bitmap 参数为借用，库不回收业务传入的 Bitmap。URL 图片由私有 Coil ImageLoader 加载；基础 SVGA 仍由引擎下载，二者不会重复下载 SVGA 文件。
+
+Coil 动态图片默认按图层实际显示区域请求解码尺寸：合并同 key 所有帧和图层的宽高、缩放/旋转，再应用 View 的 ScaleType 或 Compose 的 ContentScale。普通图片根据原图比例和 EXIF 方向计算覆盖区域两个方向所需的像素，避免宽高比不同时先缩得过小、再被图层拉伸；圆形图片以区域最长边作为直径，居中裁剪结果由 Coil 缓存。解码最长边限制为 1024 px，`size` 可指定更小的上限，超出上限时保留原图比例缩小，不放大低分辨率原图。手动调用 `bindings.prepare` 可传入展示宽高和 ScaleType；不传时按素材坐标计算，找不到图层时回退到 `size`（未指定则为 1 px）。直接传入 Bitmap 的重载保留借用行为。
 
 View API 在主线程调用。不同请求替换时取消并清理会话；相同请求重复绑定会保留播放状态。detach 时立即释放；可用 `restartOnAttach` 配置重新 attach 后自动重载。暂停保留进度，不可见时停止逐帧工作，只保留低频可见性检查。新的 View 适配器用 Choreographer 驱动，滚动文字和音频随同一会话推进。
 
@@ -136,7 +138,7 @@ SvgaView(
 )
 ```
 
-支持 Fit、Crop、FillBounds、None 等 ContentScale 和 Alignment。传入布局真实尺寸，按 64 px 分档；尺寸缩小复用现有资源，放大稳定 120 ms 后后台准备更高规格，保留播放进度。帧状态在绘制阶段读取，不要求父组件逐帧重组。
+支持 Fit、Crop、FillBounds、None 等 ContentScale 和 Alignment。传入布局真实尺寸，按 64 px 分档；尺寸缩小复用现有资源，放大稳定 120 ms 后后台准备更高规格，保留播放进度。新渲染器准备完成前继续显示旧画面，尺寸升级复用音频会话，不重复触发 `onReady`。帧状态在绘制阶段读取，不要求父组件逐帧重组。
 
 `state` 提供 `loadState`、`error`、`isPlaying`、`currentFrame`、`progress`、`completedIterations`，以及 pause / resume / seekToProgress / replay。同一个 state 只能绑定一个组件。换回调不会重新加载；离开组合释放会话，页面进入后台停止帧循环。列表屏幕外可见性由业务传 `visible`。
 

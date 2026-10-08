@@ -2,6 +2,7 @@ package com.opensource.svgaplayer
 
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Path
 import android.widget.ImageView
 import com.opensource.svgaplayer.bitmap.SvgaImageDecoder
@@ -32,6 +33,24 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
         val sprite = data.spriteList.firstOrNull { it.imageKey?.removeSuffix(".matte") == key } ?: return null
         return android.util.Size(sprite.frames.maxOfOrNull { it.layout.width.toInt() } ?: 0,
             sprite.frames.maxOfOrNull { it.layout.height.toInt() } ?: 0)
+    }
+    /** Maximum image fill size across all uses, including frame transforms and presentation scale. */
+    fun layerImageSize(key: String, scaleX: Float = 1f, scaleY: Float = 1f): android.util.Size? {
+        require(scaleX.isFinite() && scaleX > 0 && scaleY.isFinite() && scaleY > 0)
+        val usage = SvgaImageSize()
+        val matrix = FloatArray(9)
+        data.spriteList.filter { it.imageKey?.removeSuffix(".matte") == key.removeSuffix(".matte") }.forEach { sprite ->
+            val matte = sprite.imageKey?.endsWith(".matte") == true
+            sprite.frames.forEach { frame ->
+                frame.transform.getValues(matrix)
+                usage.include(frame.layout.width, frame.layout.height,
+                    matrix[Matrix.MSCALE_X].toDouble() * scaleX, matrix[Matrix.MSKEW_Y].toDouble() * scaleY,
+                    matrix[Matrix.MSKEW_X].toDouble() * scaleX, matrix[Matrix.MSCALE_Y].toDouble() * scaleY,
+                    visible = matte || !(frame.alpha <= 0.0))
+            }
+        }
+        val size = usage.displayedSize() ?: return null
+        return android.util.Size(size.first, size.second)
     }
     fun newRenderer(bindings: SVGADynamicEntity = SVGADynamicEntity()) = SvgaRenderer(newVideoEntity(), bindings)
 
