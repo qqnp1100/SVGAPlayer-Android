@@ -10,9 +10,17 @@ internal class SvgaImageSize {
     private var invalid = false
     var hasVisibleFrame = false
         private set
+    var visibleUseCount = 0
+        private set
+    var singleUseFrame: Int? = null
+        private set
 
     fun include(layoutWidth: Double, layoutHeight: Double, a: Double, b: Double, c: Double, d: Double,
-                visible: Boolean = true) {
+                visible: Boolean = true, frameIndex: Int = -1) {
+        if (visible) {
+            visibleUseCount = (visibleUseCount + 1).coerceAtMost(2)
+            singleUseFrame = if (visibleUseCount == 1) frameIndex else null
+        }
         if (hasVisibleFrame && !visible) return
         if (visible && !hasVisibleFrame) {
             // Retain invisible-frame sizing only as a fallback when filtering is disabled.

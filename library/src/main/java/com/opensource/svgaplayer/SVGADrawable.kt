@@ -7,6 +7,7 @@ import android.graphics.drawable.Drawable
 import android.os.SystemClock
 import android.widget.ImageView
 import com.opensource.svgaplayer.drawer.SVGACanvasDrawer
+import kotlinx.coroutines.*
 
 class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicEntity) :
     Drawable() {
@@ -34,6 +35,9 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     private val drawer = SVGACanvasDrawer(videoItem, dynamicItem)
     private var externalClock = false
     private var presentationTimeNanos = 0L
+    private val frameScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var pendingFrame: Job? = null
+    private var drawnFrame = -1
 
     /** The modern adapter owns scheduling; scrolling text uses the same presentation timeline. */
     fun advanceExternalClock(frame: Int, timeNanos: Long) {
@@ -55,11 +59,17 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     /** Prepare text/path caches on a worker before the first visible frame. */
     fun prepare(width: Int, height: Int) {
+        prepareFrame(currentFrame)
         val picture = android.graphics.Picture()
         val canvas = picture.beginRecording(width, height)
         try { drawer.renderFrame(canvas, currentFrame, scaleType, width, height, 0L) }
         finally { picture.endRecording() }
     }
+    /** Prepare only this frame's deferred pixels on the caller's worker thread. */
+    fun prepareFrame(frame: Int) { videoItem.deferredImages?.prepare(frame) }
+    fun isFrameReady(frame: Int): Boolean = videoItem.deferredImages?.isReady(frame) != false
+    internal fun prepareAllImages() { videoItem.deferredImages?.prepareAll() }
+    internal fun areAllImagesReady(): Boolean = videoItem.deferredImages?.allReady() != false
     private var textScrollAttached = true
     private var textScrollVisible = true
     private val textScrollTicker = TextScrollTicker(
@@ -84,11 +94,30 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
             textScrollTicker.onDraw(false)
             return
         }
-        if (externalClock) drawer.renderFrame(canvas, currentFrame, scaleType, canvas.width, canvas.height, presentationTimeNanos)
+        val frame = currentFrame
+        if (!isFrameReady(frame) && callback is android.view.View) {
+            // Covers a View drawing during initial preparation or direct Drawable frame updates.
+            if (pendingFrame?.isActive != true) pendingFrame = frameScope.launch {
+                try {
+                    withContext(Dispatchers.Default) { prepareFrame(frame) }
+                    ensureActive()
+                    invalidateSelf()
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    cleared = true
+                    android.util.Log.e("SVGADrawable", "Frame decode failed", e)
+                }
+            }
+            if (drawnFrame < 0 || !isFrameReady(drawnFrame)) return
+        } else prepareFrame(frame)
+        val displayFrame = if (isFrameReady(frame)) frame else drawnFrame
+        if (externalClock) drawer.renderFrame(canvas, displayFrame, scaleType, canvas.width, canvas.height, presentationTimeNanos)
         else {
-            drawer.drawFrame(canvas, currentFrame, scaleType)
+            drawer.drawFrame(canvas, displayFrame, scaleType)
             textScrollTicker.onDraw(drawer.hasActiveScrollingText)
         }
+        drawnFrame = displayFrame
+        videoItem.deferredImages?.afterDraw(displayFrame, canvas, callback as? android.view.View)
     }
 
     internal fun setTextScrollEnabled(enabled: Boolean) {
@@ -178,6 +207,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     }
 
     fun clear() {
+        frameScope.cancel()
         textScrollTicker.stop()
         drawer.pauseTextScrolling()
         drawer.clearCaches()

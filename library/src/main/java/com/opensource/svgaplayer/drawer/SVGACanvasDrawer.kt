@@ -351,7 +351,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             imageKey.length - 6
         ) else imageKey
         val dynamicAnimatedImage = dynamicItem.getDynamicAnimatedImage(bitmapKey)
-        val drawingBitmap = dynamicItem.getDynamicImage(bitmapKey) ?: videoItem.imageMap[bitmapKey]
+        val drawingBitmap = dynamicItem.getDynamicImage(bitmapKey) ?: videoItem.bitmap(bitmapKey)
         if (dynamicAnimatedImage == null && drawingBitmap == null) {
             return
         }

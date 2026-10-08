@@ -12,8 +12,9 @@ import kotlin.math.roundToInt
 
 internal object SvgaImageDecoder {
     fun decode(file: File?, bytes: ByteArray?, sourceWidth: Int, sourceHeight: Int,
-               width: Int, height: Int, options: SvgaDecodeOptions): Bitmap? {
-        val bitmap = if (Build.VERSION.SDK_INT >= 28) {
+               width: Int, height: Int, options: SvgaDecodeOptions,
+               inBitmap: Bitmap? = null, mutable: Boolean = false): Bitmap? {
+        val bitmap = if (Build.VERSION.SDK_INT >= 28 && !mutable && inBitmap == null) {
             val source = if (file != null) ImageDecoder.createSource(file)
                 else ImageDecoder.createSource(ByteBuffer.wrap(requireNotNull(bytes)))
             ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
@@ -25,7 +26,12 @@ internal object SvgaImageDecoder {
             }
         } else {
             val opts = BitmapFactory.Options().apply {
+                inMutable = mutable || inBitmap != null
+                this.inBitmap = inBitmap
                 inPreferredConfig = options.bitmapConfig
+                if (mutable && Build.VERSION.SDK_INT >= 26) {
+                    inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
+                }
                 inSampleSize = 1
                 while (sourceWidth / (inSampleSize * 2) >= width && sourceHeight / (inSampleSize * 2) >= height) {
                     inSampleSize *= 2
@@ -36,8 +42,15 @@ internal object SvgaImageDecoder {
                 inDensity = 1_000_000
                 inTargetDensity = (inDensity * scale).roundToInt().coerceAtLeast(1)
             }
-            if (file != null) BitmapFactory.decodeFile(file.path, opts)
-            else requireNotNull(bytes).let { BitmapFactory.decodeByteArray(it, 0, it.size, opts) }
+            fun decode() = if (file != null) BitmapFactory.decodeFile(file.path, opts)
+                else requireNotNull(bytes).let { BitmapFactory.decodeByteArray(it, 0, it.size, opts) }
+            try { decode() } catch (e: IllegalArgumentException) {
+                if (inBitmap == null) throw e
+                // Native decoders may reject an otherwise sufficiently sized allocation.
+                opts.inBitmap = null
+                inBitmap.recycle()
+                decode()
+            }
         }
         // Rendering uses an explicit matrix; synthetic density must never scale pixels again.
         bitmap?.density = Bitmap.DENSITY_NONE

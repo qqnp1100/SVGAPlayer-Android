@@ -63,6 +63,9 @@ class SVGAVideoEntity {
     internal var soundPool: SoundPool? = null
     private var soundCallback: SVGASoundManager.SVGASoundCallBack? = null
     internal var imageMap = HashMap<String, Bitmap>()
+    internal val deferredImageSources = HashMap<String, SvgaDeferredImage>()
+    internal var deferredImageBudget = 0L
+    internal var deferredImages: SvgaDeferredImages? = null
     private var mCacheDir: File
     private var mFrameHeight = 0
     private var mFrameWidth = 0
@@ -86,6 +89,9 @@ class SVGAVideoEntity {
         frames = resource.frames
         spriteList = resource.spriteList
         imageMap.putAll(resource.imageMap)
+        deferredImages = resource.deferredImageSources.takeIf { it.isNotEmpty() }?.let {
+            SvgaDeferredImages(it.toMap(), resource.deferredImageBudget)
+        }
         scaleMap.putAll(resource.scaleMap)
         isParser = true
         sharesResources = true
@@ -125,9 +131,11 @@ class SVGAVideoEntity {
     }
 
     public fun getImageSizeByKey(key: String): Size? {
-        val bitmap = imageMap[key] ?: return null
+        val bitmap = imageMap[key] ?: return deferredImages?.size(key)
         return Size(bitmap.width, bitmap.height)
     }
+
+    internal fun bitmap(key: String): Bitmap? = imageMap[key] ?: deferredImages?.bitmap(key)
 
     public suspend fun parserImages(view: View) {
         synchronized(imageMap) {
@@ -518,13 +526,13 @@ class SVGAVideoEntity {
     }
 
     fun imageMapSize(): Int {
-        var total = 0
+        var total = deferredImages?.allocationBytes ?: 0L
         synchronized(imageMap) {
             imageMap.map {
-                total += it.value.width * it.value.height * 4
+                total += it.value.allocationByteCount
             }
         }
-        return total
+        return total.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     }
 
     fun isRecycleImage(): Boolean {
@@ -543,6 +551,8 @@ class SVGAVideoEntity {
 
     fun clear() {
         synchronized(imageMap) { isClean = true }
+        deferredImages?.close(); deferredImages = null
+        deferredImageSources.clear()
         resource = null
         movieItem = null
         imageJson = null

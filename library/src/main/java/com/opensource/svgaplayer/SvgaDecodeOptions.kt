@@ -8,6 +8,8 @@ data class SvgaDecodeOptions(
     val bitmapConfig: Bitmap.Config = Bitmap.Config.ARGB_8888,
     /** Skip unused / always-transparent image layers across the entire animation. */
     val skipInvisibleImages: Boolean = false,
+    /** Resource loader: defer images with exactly one visible layer/frame reference. */
+    val inBitmap: Boolean = false,
 ) {
     init {
         require(bitmapConfig == Bitmap.Config.ARGB_8888 || bitmapConfig == Bitmap.Config.RGB_565) {

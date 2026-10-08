@@ -53,12 +53,14 @@ data class SvgaRequest(
     /** Null inherits SvgaDecodeOptions.defaults at load time. */
     val bitmapConfig: Bitmap.Config? = null,
     val skipInvisibleImages: Boolean? = null,
+    /** Defer single-use images; loadSvga enables this only for single-iteration playback. */
+    val inBitmap: Boolean = false,
 ) {
     init { require(width >= 0 && height >= 0); require(!(cacheOnly && refresh)) }
     constructor(source: Any) : this(SvgaSource.from(source))
     internal fun snapshot() = copy(headers = headers.toSortedMap().toMap())
     fun resolveDecodeOptions(defaults: SvgaDecodeOptions = SvgaDecodeOptions.defaults) = SvgaDecodeOptions(
-        bitmapConfig ?: defaults.bitmapConfig, skipInvisibleImages ?: defaults.skipInvisibleImages)
+        bitmapConfig ?: defaults.bitmapConfig, skipInvisibleImages ?: defaults.skipInvisibleImages, inBitmap)
     val readsMemory get() = memoryRead ?: memoryCache ?: cachePolicy.memory
     val writesMemory get() = memoryWrite ?: memoryCache ?: cachePolicy.memory
     val usesWeakMemory get() = weakMemoryCache ?: cachePolicy.memory

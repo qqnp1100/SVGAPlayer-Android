@@ -10,14 +10,14 @@ internal fun SVGAVideoEntity.imageUsage(): Map<String, SvgaImageSize> {
     spriteList.forEach { sprite ->
         val imageKey = sprite.imageKey ?: return@forEach
         val matte = imageKey.endsWith(".matte")
-        sprite.frames.forEach { frame ->
+        sprite.frames.forEachIndexed { frameIndex, frame ->
             // Keep matte images conservatively, including transparent masks.
             frame.transform.getValues(matrix)
             usage.getOrPut(imageKey.removeSuffix(".matte")) { SvgaImageSize() }.include(
                 frame.layout.width, frame.layout.height,
                 matrix[Matrix.MSCALE_X].toDouble(), matrix[Matrix.MSKEW_Y].toDouble(),
                 matrix[Matrix.MSKEW_X].toDouble(), matrix[Matrix.MSCALE_Y].toDouble(),
-                visible = matte || !(frame.alpha <= 0.0))
+                visible = matte || !(frame.alpha <= 0.0), frameIndex = frameIndex)
         }
     }
     return usage

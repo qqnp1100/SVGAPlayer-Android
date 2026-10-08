@@ -30,6 +30,8 @@ class SvgaViewOptions {
     var weakMemoryCache: Boolean? = null
     var bitmapConfig: android.graphics.Bitmap.Config? = null
     var skipInvisibleImages: Boolean? = null
+    /** Single playback only: decode single-use images during playback with a private Bitmap pool. */
+    var inBitmap = false
     var iterations = 0
     var autoPlay = true
     /** Display frame zero only, without preparing audio or starting a playback clock. */
@@ -58,11 +60,15 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
     private val loader = options.loader ?: SvgaImageLoader.get(view.context)
     private val decodeDefaults = SvgaDecodeOptions.defaults
     private val decodeScaleType = view.scaleType
+    private val useInBitmap = options.inBitmap && !options.staticImage &&
+        (if (options.useViewControls) view.loops == 1 else options.iterations == 1)
     private var clock: SvgaPlayback? = null
     private var drawable: SVGADrawable? = null
     private var audio: SvgaAudioSession? = null
     private var resource: SvgaResource? = null
     private var updateJob: Job? = null
+    private var frameJob: Job? = null
+    private var pendingCompletion = false
     private var playing = options.autoPlay && !options.staticImage
     private var loadStarted = false
     private var closed = false
@@ -112,6 +118,7 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
                     weakMemoryCache = options.weakMemoryCache ?: baseRequest.weakMemoryCache,
                     bitmapConfig = options.bitmapConfig ?: baseRequest.bitmapConfig ?: decodeDefaults.bitmapConfig,
                     skipInvisibleImages = options.skipInvisibleImages ?: baseRequest.skipInvisibleImages ?: decodeDefaults.skipInvisibleImages,
+                    inBitmap = useInBitmap,
                 )
                 val loaded = loader.load(request) { progress ->
                     withContext(Dispatchers.Main.immediate) {
@@ -160,7 +167,7 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
                     pendingDrawable = candidate
                     pendingDynamic = null // The drawable now owns the dynamic entity.
                     candidate.scaleType = view.scaleType
-                    candidate.advanceExternalClock(0, 0)
+                    candidate.advanceExternalClock(playback?.frame ?: 0, 0)
                     val width = view.width; val height = view.height
                     withContext(Dispatchers.Default) { candidate.prepare(width, height) }
                     if (options.bindingsFactory != null || bindings === options.bindings) break
@@ -172,7 +179,7 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
                 audio = pendingSound
                 pendingSound = null
                 view.setImageDrawable(prepared)
-                if (options.staticImage) prepared.showStaticFrame() else view.stepToFrame(0, false)
+                if (options.staticImage) prepared.showStaticFrame() else view.stepToFrame(playback?.frame ?: 0, false)
                 prepared.setPlaybackActive(playing)
                 clock = playback
                 ready = true
@@ -195,17 +202,24 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
         Choreographer.getInstance().removeFrameCallback(this)
         Choreographer.getInstance().postFrameCallback(this)
     } }
+    private fun isHostActive() = view.isAttachedToWindow && view.isShown && view.getGlobalVisibleRect(visibleRect) &&
+        (view.findViewTreeLifecycleOwner()?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.STARTED) != false)
     override fun doFrame(frameTimeNanos: Long) {
         if (closed || !view.isAttachedToWindow) return
         val clock = clock ?: return
-        val visible = view.isShown && view.getGlobalVisibleRect(visibleRect) &&
-            (view.findViewTreeLifecycleOwner()?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.STARTED) != false)
+        val visible = isHostActive()
         if (playing && visible) {
             if (!hostActive) { hostActive = true; drawable?.setPlaybackActive(true) }
-            val done = clock.tick(frameTimeNanos, options.iterations, options.speed)
-            drawable?.advanceExternalClock(clock.frame, clock.positionNanos)
-            audio?.advance(clock.frame, clock.completedIterations, options.speed, options.reverse)
-            if (done) { pause(); options.onFinished() }
+            if (frameJob?.isActive == true) { clock.pause(); audio?.pause(); schedule(); return }
+            pendingCompletion = clock.tick(frameTimeNanos, options.iterations, options.speed) || pendingCompletion
+            val frame = clock.frame
+            val presentation = drawable
+            if (presentation != null && !presentation.isFrameReady(frame)) {
+                clock.pause(); audio?.pause()
+                prepareFrame(presentation, frame) {
+                    if (playing && this.clock === clock && clock.frame == frame) presentFrame(clock)
+                }
+            } else presentFrame(clock)
         } else {
             if (!playing || options.hiddenBehavior != SvgaHiddenBehavior.CONTINUE_TIMELINE) clock.pause()
             if (!visible && options.hiddenBehavior == SvgaHiddenBehavior.STOP) pause()
@@ -218,7 +232,40 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
     fun pause() { if (closed) return; if (options.useViewControls) view.pauseAnimation(); playing = false; clock?.pause(); audio?.pause(); drawable?.setPlaybackActive(false); hostActive = false
         Choreographer.getInstance().removeFrameCallback(this); view.removeCallbacks(visibilityCheck) }
     fun resume() { if (!closed && !options.staticImage) { if (options.useViewControls) view.resumeAnimation(); playing = true; clock?.pause(); schedule() } }
-    fun seekToProgress(progress: Float) { if (closed || options.staticImage) return; if (options.useViewControls) view.stepToPercentage(progress.toDouble(), playing); clock?.seek(progress); audio?.pause(); clock?.let { drawable?.updateCurrentFrame(it.frame) } }
+    fun seekToProgress(progress: Float) {
+        if (closed || options.staticImage) return
+        frameJob?.cancel(); frameJob = null
+        pendingCompletion = false
+        if (options.useViewControls) view.stepToPercentage(progress.toDouble(), playing)
+        clock?.seek(progress); audio?.pause()
+        val playback = clock ?: return
+        val presentation = drawable ?: return
+        val frame = playback.frame
+        if (presentation.isFrameReady(frame)) presentation.updateCurrentFrame(frame)
+        else prepareFrame(presentation, frame) {
+            if (clock === playback && playback.frame == frame) presentation.updateCurrentFrame(frame)
+        }
+    }
+    private fun presentFrame(clock: SvgaPlayback) {
+        // Decode completion can arrive after the host was hidden or stopped.
+        if (!isHostActive()) { schedule(); return }
+        drawable?.advanceExternalClock(clock.frame, clock.positionNanos)
+        audio?.advance(clock.frame, clock.completedIterations, options.speed, options.reverse)
+        if (pendingCompletion) { pendingCompletion = false; pause(); options.onFinished() }
+    }
+    private fun prepareFrame(presentation: SVGADrawable, frame: Int, onPrepared: () -> Unit) {
+        frameJob?.cancel()
+        frameJob = scope.launch {
+            try {
+                withContext(Dispatchers.Default) { presentation.prepareFrame(frame) }
+                ensureActive()
+                if (!closed && drawable === presentation) onPrepared()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Throwable) {
+                failed = true; ready = false; pause(); clearPresentation(); options.onError(e)
+            }
+        }
+    }
     fun replay() { seekToProgress(0f); resume() }
     fun updateBindings(bindings: SvgaBindings) {
         if (closed) return
@@ -256,11 +303,13 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
         if (!closed && decodeScaleType != view.scaleType) return false
         if (closed || failed || !next.reuseOnRebind || !options.reuseOnRebind || identity != requestIdentity(nextSource)) return false
         if ((nextSource as? SvgaRequest)?.refresh == true) return false
+        if (useInBitmap != (next.inBitmap && !next.staticImage &&
+                (if (next.useViewControls) view.loops == 1 else next.iterations == 1))) return false
         if (options.loader !== next.loader || options.requestFactory !== next.requestFactory ||
             options.bindingsFactory !== next.bindingsFactory ||
             options.onResourceReady !== next.onResourceReady || options.useViewControls != next.useViewControls ||
             options.cachePolicy != next.cachePolicy || options.memoryCache != next.memoryCache || options.weakMemoryCache != next.weakMemoryCache ||
-            options.bitmapConfig != next.bitmapConfig || options.skipInvisibleImages != next.skipInvisibleImages ||
+            options.bitmapConfig != next.bitmapConfig || options.skipInvisibleImages != next.skipInvisibleImages || options.inBitmap != next.inBitmap ||
             options.iterations != next.iterations || options.autoPlay != next.autoPlay || options.staticImage != next.staticImage || options.speed != next.speed ||
             options.startFrame != next.startFrame || options.endFrame != next.endFrame || options.reverse != next.reverse ||
             options.hiddenBehavior != next.hiddenBehavior ||
@@ -292,9 +341,11 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
         scope.cancel(); Choreographer.getInstance().removeFrameCallback(this)
         view.removeCallbacks(visibilityCheck)
         updateJob = null
+        frameJob = null
         clearPresentation()
     }
     private fun clearPresentation() {
+        pendingCompletion = false
         audio?.close(); audio = null
         targetView?.let { view ->
             if (view.getTag(R.id.svga_coil_request) === this) { view.stopAnimation(false); view.clear() }

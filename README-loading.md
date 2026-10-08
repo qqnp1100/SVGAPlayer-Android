@@ -306,6 +306,19 @@ val engine = SvgaEngine(context, weakMemoryCacheEnabled = false)
 
 两个请求开关均为 nullable：null 继承 `cachePolicy.memory`。默认 ALL（以及 MEMORY）启用两层，NONE / DISK 默认关闭两层；显式 true / false 可独立覆盖。例如 `memoryCache = false` 不会关闭默认弱缓存。既有 `memoryRead` / `memoryWrite` 优先于 `memoryCache`，仅控制强缓存读写；若要禁用所有资源内存缓存，还需设置 `weakMemoryCache = false`。View/Compose 未设置开关时保留传入 SvgaRequest 的配置；设置后覆盖对应字段。
 
+`loadSvga` 可为单次播放启用按需图片解码，默认 `inBitmap = false`：
+
+```kotlin
+svgaView.loadSvga(url) {
+    iterations = 1
+    inBitmap = true
+}
+```
+
+开启后按可见图层/帧引用总次数分类：同一图片被多个帧或图层引用时仍预解码；只有一次可见引用的图片保留压缩数据，播放到对应帧时在后台解码。按实际解码宽、高统计这些单次图片：同分辨率至少有两张时，使用 `BitmapFactory.Options.inBitmap` 复用已退出绘制的可变 Bitmap；同分辨率只有一张时，仅使用普通解码器按需解码，不取用也不进入复用池。不可见且未使用的图片不解码，遮罩引用保守计入。每个展示实例拥有独立的像素和有容量限制的复用池，压缩数据计入共享资源缓存大小。首个展示帧需要的图片准备完成后才启动播放；后续帧等待解码时暂停播放时钟与音频，不在主线程等待解码。
+
+仅 `iterations = 1` 且非 `staticImage` 时生效，循环及静态展示保持全量预解码。使用 `useViewControls = true` 时以加载前的 `svgaView.loops = 1` 为准。Compose `SvgaView` 始终使用全量预解码，即使传入的 `SvgaRequest` 设置了 `inBitmap = true`，以免在绘制阶段等待解码。开关参与资源缓存和 View 重绑定身份，默认资源与按需资源不会混用。跳转或再次播放会重新解码已被覆盖的单次图片；保留最后显示帧，直到展示被替换或清理。Android 28+ 参与复用的单次图片使用 BitmapFactory，分辨率唯一的单次图片及重复图片继续使用原有解码器。
+
 查询顺序是强 LRU → 弱索引 → 磁盘/网络；弱命中允许按当前请求配置提升到强 LRU。弱索引与强缓存都检查来源、尺寸和新鲜度，refresh 绕过并失效两层，no-store 不登记可复用资源。`clearMemory()` 清空两层索引，不回收播放实例正在使用的资源。`memoryHits` 记录强命中，`weakMemoryHits` 单独记录弱命中。
 
 通过 `ReferenceQueue` 在缓存操作时清理已回收资源对应的 key 和引用；队列中的旧引用不会误删同 key 的新资源。索引不持有 View、Context、回调或播放实例。弱引用非空只代表资源仍存活，不能作为正在播放的判断，也不保证预加载资源在下一次请求时仍然存在。32 MiB 的默认预算仅约束强引用 LRU，并不是所有活动资源的总内存上限。

@@ -10,12 +10,34 @@ import androidx.lifecycle.Lifecycle
 import com.opensource.svgaplayer.compose.*
 import com.opensource.svgaplayer.loader.*
 import com.opensource.svgaplayer.coil3.*
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 
 class SvgaComposeTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun deferredRequestUsesAnEagerResourceInCompose() {
+        val state = SvgaState()
+        val engine = SvgaEngine(compose.activity)
+        val loader = SvgaImageLoader(compose.activity, engine)
+        val request = SvgaRequest(SvgaSource.Asset("rose_2.0.0.svga"), 128, 128)
+        try {
+            val eager = runBlocking { engine.acquire(request) }
+            compose.setContent {
+                SvgaView(request.copy(inBitmap = true), Modifier.size(128.dp), state,
+                    loader = loader, autoPlay = false)
+            }
+            compose.waitUntil(20_000) { state.loadState == SvgaLoadState.READY }
+            assertEquals("Compose must reuse the prepared eager resource", 1L, engine.decodeCount.get())
+            assertTrue(engine.memoryHits.get() > 0)
+            assertSame(eager, runBlocking { engine.acquire(request) })
+            compose.runOnUiThread { state.seekToProgress(1f) }
+            compose.waitForIdle()
+            assertNull(state.error)
+        } finally { loader.close(); engine.close() }
+    }
 
     @Test fun networkProgressIsOnMainAndResetsForLocalSource() {
         val server = okhttp3.mockwebserver.MockWebServer(); server.start()

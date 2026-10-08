@@ -101,7 +101,9 @@ fun SvgaView(
         val base = (source as? SvgaRequest) ?: SvgaRequest(SvgaSource.from(source), cachePolicy = cachePolicy)
         base.copy(memoryCache = memoryCache ?: base.memoryCache, weakMemoryCache = weakMemoryCache ?: base.weakMemoryCache,
             bitmapConfig = bitmapConfig ?: base.bitmapConfig ?: decodeDefaults.bitmapConfig,
-            skipInvisibleImages = skipInvisibleImages ?: base.skipInvisibleImages ?: decodeDefaults.skipInvisibleImages)
+            skipInvisibleImages = skipInvisibleImages ?: base.skipInvisibleImages ?: decodeDefaults.skipInvisibleImages,
+            // Compose draws synchronously; all pixels must be decoded before publishing the renderer.
+            inBitmap = false)
     }
     var size by remember { mutableStateOf(IntSize.Zero) }
     var decodeSize by remember(request) { mutableStateOf(IntSize.Zero) }

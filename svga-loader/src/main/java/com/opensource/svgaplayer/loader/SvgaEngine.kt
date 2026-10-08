@@ -58,7 +58,7 @@ class SvgaEngine(
     suspend fun acquire(request: SvgaRequest, onDownloadProgress: (suspend (SvgaDownloadProgress) -> Unit)? = request.onDownloadProgress): SvgaResource {
         val r = request.snapshot()
         val decodeOptions = r.resolveDecodeOptions()
-        val decodeKey = "${r.width}:${r.height}:${decodeOptions.bitmapConfig.name}:${decodeOptions.skipInvisibleImages}"
+        val decodeKey = "${r.width}:${r.height}:${decodeOptions.bitmapConfig.name}:${decodeOptions.skipInvisibleImages}:${decodeOptions.inBitmap}"
         check(scope.isActive) { "Engine closed" }
         val lookupKey = "${sourceIdentity(r)}:$decodeKey"
         val weakEnabled = weakMemoryCacheEnabled && r.usesWeakMemory

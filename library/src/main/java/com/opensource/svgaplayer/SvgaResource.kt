@@ -17,7 +17,7 @@ import java.io.InputStream
 import java.util.zip.InflaterInputStream
 import java.util.zip.ZipInputStream
 
-/** Immutable, fully prepared data. Bitmaps use GC ownership: eviction never recycles live pixels. */
+/** Shared immutable data. Deferred images keep encoded bytes; their pixels belong to presentations. */
 class SvgaResource private constructor(private val data: SVGAVideoEntity) {
     val width get() = data.videoSize.width.toInt()
     val height get() = data.videoSize.height.toInt()
@@ -25,6 +25,7 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
     val fps get() = data.FPS
     val layerKeys: List<String> get() = data.spriteList.mapNotNull { it.imageKey }.filterNot { it.endsWith(".matte") }.distinct()
     val sizeBytes: Long get() = audioTracks.sumOf { it.bytes.size.toLong() } + data.imageMap.values.sumOf { it.allocationByteCount.toLong() } +
+        data.deferredImageSources.values.sumOf { it.bytes.size.toLong() } +
         data.spriteList.sumOf { it.frames.size.toLong() * 256 } + 1024
     fun newVideoEntity(): SVGAVideoEntity = SVGAVideoEntity(data).also { it.resource = this }
     fun layerSize(key: String): android.util.Size? {
@@ -105,7 +106,7 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                 job.ensureActive()
                 if (key in audioKeys) continue
                 val imageUsage = usage[key.removeSuffix(".matte")]
-                if (decodeOptions.skipInvisibleImages && imageUsage?.hasVisibleFrame != true) continue
+                if ((decodeOptions.skipInvisibleImages || decodeOptions.inBitmap) && imageUsage?.hasVisibleFrame != true) continue
                 val bytes = images[key]?.toByteArray()
                 fun imageFile(name: String): File {
                     val file = listOf(name, "$name.png", "$key.png").map { File(directory, it).canonicalFile }
@@ -121,6 +122,12 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                 }
                 require(opts.outWidth > 0 && opts.outHeight > 0) { "Invalid image $key" }
                 val target = SvgaImageSize.target(imageUsage, opts.outWidth, opts.outHeight, viewportScale)
+                if (decodeOptions.inBitmap && imageUsage?.visibleUseCount == 1) {
+                    video.deferredImageSources[key.removeSuffix(".matte")] = SvgaDeferredImage(
+                        file?.readBytes() ?: requireNotNull(bytes), checkNotNull(imageUsage.singleUseFrame),
+                        opts.outWidth, opts.outHeight, target.first, target.second, decodeOptions)
+                    continue
+                }
                 // RGB_565 is a preference: alpha images can still require four bytes per pixel.
                 require(target.first.toLong() <= (maxDecodedBytes - pixels) / 4 / target.second) {
                     "Decoded image budget exceeded"
@@ -134,13 +141,19 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                 pixels += bitmap.allocationByteCount
                 video.imageMap[key.removeSuffix(".matte")] = bitmap.apply { prepareToDraw() }
             }
+            video.deferredImageBudget = maxDecodedBytes - pixels
+            video.deferredImageSources.values.groupBy { it.frame }.values.forEach { imagesInFrame ->
+                require(imagesInFrame.sumOf { it.width.toLong() * it.height * 4 } <= video.deferredImageBudget) {
+                    "Decoded image budget exceeded"
+                }
+            }
             val scratch = Path()
             video.spriteList.forEach { sprite -> sprite.frames.forEach { frame ->
                 job.ensureActive()
                 frame.shapes.forEach { it.buildPath() }
                 frame.maskPath?.buildPath(scratch)
             } }
-            // Audio bytes are retained separately by the session implementation; no encoded image copies remain.
+            // Only deferred images retain encoded bytes, independent of temporary staging files.
             val resource = SvgaResource(video)
             resource.audioTracks = video.movieItem?.audios.orEmpty().mapNotNull { audio ->
                 images[audio.audioKey]?.let { SvgaAudioTrack(it.toByteArray(), audio.startFrame ?: 0,
@@ -165,6 +178,7 @@ class SvgaRenderer internal constructor(private val video: SVGAVideoEntity, val 
     private val point = FloatArray(2)
     val hasActiveScrollingText get() = drawer.hasActiveScrollingText
     fun prepare(width: Int, height: Int) {
+        video.deferredImages?.prepare(0)
         val picture = android.graphics.Picture()
         val canvas = picture.beginRecording(width, height)
         try { drawer.renderFrame(canvas, 0, ImageView.ScaleType.FIT_XY, width, height, 0) }
@@ -172,12 +186,14 @@ class SvgaRenderer internal constructor(private val video: SVGAVideoEntity, val 
     }
     fun draw(canvas: Canvas, width: Int, height: Int, frame: Int, timeNanos: Long) {
         if (width <= 0 || height <= 0) return
+        video.deferredImages?.prepare(frame)
         viewportWidth = width; viewportHeight = height; drawnFrame = frame
         val save = canvas.save()
         try {
             canvas.clipRect(0, 0, width, height)
             drawer.renderFrame(canvas, frame, ImageView.ScaleType.FIT_XY, width, height, timeNanos)
         } finally { canvas.restoreToCount(save) }
+        video.deferredImages?.afterDraw(frame, canvas)
     }
     /** Hit test the last displayed frame, inverse-transforming rotated/mirrored layers. */
     fun hitTest(x: Float, y: Float): String? {
