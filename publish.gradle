@@ -1,7 +1,7 @@
 // Apply to every independently consumable Android library; no remote repository is configured.
 apply plugin: 'maven-publish'
 group = 'com.opensource.svgaplayer'
-version = '3.0.0-SNAPSHOT'
+version = '3.0.0-beta1'
 android {
     publishing { singleVariant('release') { withSourcesJar() } }
 }

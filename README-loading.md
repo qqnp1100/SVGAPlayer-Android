@@ -7,9 +7,6 @@
 基础图片支持进程级默认配置和单次加载覆盖。建议在 Application 初始化时设置全局默认：
 
 ```kotlin
-import android.graphics.Bitmap
-import com.opensource.svgaplayer.SvgaDecodeOptions
-
 SvgaDecodeOptions.defaults = SvgaDecodeOptions(
     bitmapConfig = Bitmap.Config.RGB_565,
     skipInvisibleImages = true,
@@ -56,33 +53,44 @@ svgaView.setVideoItem(videoItem)
 
 ## 模块
 
-| 模块 | 本地发布 artifactId | 内容 |
+| 模块 | JitPack artifactId | 内容 |
 | --- | --- | --- |
 | `library` | `svga-core` | 旧 API、只读资源、渲染器、播放时钟、实例音频 |
 | `svga-loader` | `svga-loader` | URL / File / Assets、并发去重、缓存、取消、预加载 |
 | `svga-coil3` | `svga-coil3` | Coil 3.3.0 Fetcher、独立 ImageLoader、View 扩展、填充 |
 | `svga-compose` | `svga-compose` | 原生 Compose 组件、状态、生命周期与交互 |
 
-仅使用 View 时依赖 `svga-coil3`，不会引入 Compose。Compose 项目依赖 `svga-compose`，启用宿主的 Compose 编译插件即可。当前构建使用 Kotlin 2.2.0、AGP 8.12.0、compileSdk 35、minSdk 21；库字节码目标为 Java 17。
+3.0.0 通过 JitPack 远程接入。以下以发布 Tag `3.0.0-beta1` 为例，版本号需与实际 Git Tag 完全一致（包括可能的 `v` 前缀）。当前构建使用 Kotlin 2.2.0、AGP 8.12.0、compileSdk 35、minSdk 21；库字节码目标为 Java 17。
 
 ```kotlin
-implementation(project(":svga-coil3")) // View 项目
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+    }
+}
+```
+
+```kotlin
+// app/build.gradle.kts，一次引入全部模块
+implementation("com.github.qqnp1100:SVGAPlayer-Android:3.0.0-beta1")
+```
+
+上述仓库坐标会聚合全部已发布模块，包括 Compose。按需接入时，使用 [JitPack 多模块坐标](https://docs.jitpack.io/building/#multi-module-projects)，与聚合依赖二选一：
+
+```kotlin
+implementation("com.github.qqnp1100.SVGAPlayer-Android:svga-coil3:3.0.0-beta1") // View
 // 或
-implementation(project(":svga-compose")) // Compose 项目
+implementation("com.github.qqnp1100.SVGAPlayer-Android:svga-compose:3.0.0-beta1") // Compose
 ```
 
-四个模块共用 `com.opensource.svgaplayer:模块名:3.0.0-SNAPSHOT` 坐标。`publish.gradle` 只配置了仓库内 `build/maven`，未上传到远程仓库：
-
-```shell
-./gradlew publishReleasePublicationToMavenRepository
-```
+仅使用 View 时选择 `svga-coil3`，不会引入 Compose；Compose 项目选择 `svga-compose` 并启用宿主的 Compose 编译插件。所需下层模块会自动引入。JitPack 构建并发布对应 Tag 后即可远程解析；本仓库内示例仍使用 `implementation(project(":svga-coil3"))` 或 `implementation(project(":svga-compose"))`。
 
 ## View
 
 ```kotlin
-import com.opensource.svgaplayer.coil3.loadSvga
-import com.opensource.svgaplayer.coil3.svgaBindings
-
 val handle = svgaView.loadSvga(giftUrl) {
     iterations = 1 // 0 表示无限循环
     bindings = svgaBindings {
@@ -112,8 +120,6 @@ View API 在主线程调用。不同请求替换时取消并清理会话；相�
 ## 原生 Compose
 
 ```kotlin
-import com.opensource.svgaplayer.compose.*
-
 val state = rememberSvgaState()
 val bindings = rememberSvgaBindings(userName, avatarUrl) {
     text("user_name", userName, textSizeSp = 16f)
