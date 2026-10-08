@@ -110,14 +110,14 @@ internal class ResumableDownload(
                                 val next = File(entry, "metadata.tmp")
                                 next.writeText(data.toString())
                                 // Old metadata describes the same representation when appending.
-                                check(next.renameTo(metadataFile)) { "Unable to save download checkpoint" }
+                                check(moveReplacing(next, metadataFile)) { "Unable to save download checkpoint" }
                                 entry.setLastModified(System.currentTimeMillis())
                             }
                             if (raw.code != 304) copyBody(raw.body ?: throw IOException("Missing response body"), target,
                                 if (append) offset else 0L, total, progress)
                             currentCoroutineContext().ensureActive()
                             if (keep) {
-                                check(target.renameTo(temp)) { "Unable to finish download checkpoint" }
+                                check(moveReplacing(target, temp)) { "Unable to finish download checkpoint" }
                                 entry.deleteRecursively()
                             }
                             return Result(temp, res)
@@ -196,6 +196,12 @@ internal class ResumableDownload(
     }
 
     companion object {
+        private fun moveReplacing(source: File, target: File): Boolean {
+            if (source.renameTo(target)) return true
+            // Windows does not replace existing files via renameTo. Both targets are private:
+            // the old checkpoint describes the same representation; the staging file is empty.
+            return target.isFile && target.delete() && source.renameTo(target)
+        }
         private val locks = Array(64) { Mutex() }
         private val MAX_AGE = TimeUnit.HOURS.toMillis(24)
         private val carriedHeaders = listOf("ETag", "Last-Modified", "Cache-Control", "Expires", "Vary")

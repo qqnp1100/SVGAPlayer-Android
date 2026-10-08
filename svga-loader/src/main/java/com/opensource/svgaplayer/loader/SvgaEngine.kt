@@ -24,8 +24,12 @@ class SvgaEngine(
     decodeConcurrency: Int = 2,
     val maxDecodedBytes: Long = 128L * 1024 * 1024,
     val weakMemoryCacheEnabled: Boolean = true,
+    preDownloadConcurrency: Int = 2,
 ) : AutoCloseable {
-    init { require(memoryBytes >= 0 && diskBytes >= 0 && maxDecodedBytes > 0) }
+    init {
+        require(memoryBytes >= 0 && diskBytes >= 0 && maxDecodedBytes > 0)
+        require(downloadConcurrency > 0 && decodeConcurrency > 0 && preDownloadConcurrency > 0)
+    }
     private val context = context.applicationContext
     private val root = File(context.cacheDir, "svga-engine").apply { mkdirs() }
     private val staging = File(root, "staging").apply { mkdirs() }
@@ -33,8 +37,16 @@ class SvgaEngine(
     private val client = client.newBuilder().cache(null).callTimeout(45, TimeUnit.SECONDS).build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val downloads = Semaphore(downloadConcurrency)
+    private val preDownloads = Semaphore(preDownloadConcurrency)
     private val decodes = Semaphore(decodeConcurrency)
-    private data class Source(val file: File, val digest: String, val reusable: Boolean, val temporary: Boolean, val expiresAt: Long = Long.MAX_VALUE, val publish: suspend () -> Unit = {})
+    private data class Source(val file: File, val digest: String, val reusable: Boolean, val temporary: Boolean,
+        val expiresAt: Long = Long.MAX_VALUE, val publish: suspend (Boolean) -> Unit = {},
+        val reject: suspend () -> Unit = {})
+    private class SourceRejections {
+        var users = 0 // Guarded by sourceRejections.
+        val digests = HashSet<String>() // Guarded by diskMutex.
+    }
+    private val sourceRejections = HashMap<String, SourceRejections>()
     private val sources = SharedFlights<String, Source>(scope) { if (it.temporary) it.file.delete() }
     private val resources = SharedFlights<String, SvgaResource>(scope)
     private val memory = ResourceMemoryCache<SvgaResource>(memoryBytes) { it.sizeBytes }
@@ -56,11 +68,9 @@ class SvgaEngine(
     }
 
     suspend fun acquire(request: SvgaRequest, onDownloadProgress: (suspend (SvgaDownloadProgress) -> Unit)? = request.onDownloadProgress): SvgaResource {
-        val r = request.snapshot()
-        val decodeOptions = r.resolveDecodeOptions()
-        val decodeKey = "${r.width}:${r.height}:${decodeOptions.bitmapConfig.name}:${decodeOptions.skipInvisibleImages}:${decodeOptions.inBitmap}"
+        val r = decodeSnapshot(request)
         check(scope.isActive) { "Engine closed" }
-        val lookupKey = "${sourceIdentity(r)}:$decodeKey"
+        val lookupKey = "${sourceIdentity(r)}:${decodeKey(r)}"
         val weakEnabled = weakMemoryCacheEnabled && r.usesWeakMemory
         if (r.refresh) memory.invalidate(sourceIdentity(r) + ":")
         if (!r.refresh) memory.find(lookupKey, r.readsMemory, weakEnabled, r.cacheOnly)?.let { hit ->
@@ -68,12 +78,69 @@ class SvgaEngine(
             memory.put(hit.key, lookupKey, hit.expires, hit.value, r.writesMemory, weakEnabled)
             return hit.value
         }
-        return sources.useWithProgress(sourceKey(r), onDownloadProgress, { progress -> downloads.withPermit { source(r, progress) } }) { source ->
+        return useSource(r, onDownloadProgress, preDownload = false) { prepare(r, it) }
+    }
+
+    /**
+     * Download the original body without decoding by default. Disk writes follow [SvgaRequest.writesDisk]
+     * and HTTP cache rules. When [parseAfterDownload] is true, also prepare the resource and apply the
+     * request's strong/weak memory cache policy. No View or playback instance is created.
+     * Compatible foreground requests share the same source flight and cancel independently.
+     */
+    suspend fun preDownload(request: SvgaRequest, parseAfterDownload: Boolean = false,
+        onDownloadProgress: (suspend (SvgaDownloadProgress) -> Unit)? = request.onDownloadProgress) {
+        val r = if (parseAfterDownload) decodeSnapshot(request) else request.snapshot()
+        check(scope.isActive) { "Engine closed" }
+        if (r.refresh) memory.invalidate(sourceIdentity(r) + ":")
+        useSource(r, onDownloadProgress, preDownload = true) { source ->
+            if (parseAfterDownload) prepare(r, source)
+            else withContext(Dispatchers.IO) { source.publish(false) }
+        }
+    }
+
+    private fun decodeSnapshot(request: SvgaRequest): SvgaRequest {
+        val r = request.snapshot()
+        val options = r.resolveDecodeOptions()
+        return r.copy(bitmapConfig = options.bitmapConfig, skipInvisibleImages = options.skipInvisibleImages)
+    }
+
+    private fun decodeKey(r: SvgaRequest): String {
+        val options = r.resolveDecodeOptions()
+        return "${r.width}:${r.height}:${options.bitmapConfig.name}:${options.skipInvisibleImages}:${options.inBitmap}"
+    }
+
+    private suspend fun <T> useSource(r: SvgaRequest, onProgress: (suspend (SvgaDownloadProgress) -> Unit)?,
+        preDownload: Boolean, consume: suspend (Source) -> T): T {
+        val identity = sourceIdentity(r)
+        // Register before downloading so a late response also sees overlapping decode failures.
+        val rejections = synchronized(sourceRejections) {
+            sourceRejections.getOrPut(identity) { SourceRejections() }.also { it.users++ }
+        }
+        try {
+            return sources.useWithProgress(sourceKey(r), onProgress, { progress ->
+                // Limit producers, not subscribers: duplicates never consume another download slot.
+                if (preDownload) preDownloads.withPermit { downloads.withPermit { source(r, progress, rejections) } }
+                else downloads.withPermit { source(r, progress, rejections) }
+            }, consume)
+        } finally {
+            synchronized(sourceRejections) {
+                // Once all overlapping requests end, later transfers may retry any body.
+                if (--rejections.users == 0) sourceRejections.remove(identity)
+            }
+        }
+    }
+
+    private suspend fun prepare(r: SvgaRequest, source: Source): SvgaResource {
+        val decodeOptions = r.resolveDecodeOptions()
+        val decodeKey = "${r.width}:${r.height}:${decodeOptions.bitmapConfig.name}:${decodeOptions.skipInvisibleImages}:${decodeOptions.inBitmap}"
+        val lookupKey = "${sourceIdentity(r)}:$decodeKey"
+        val weakEnabled = weakMemoryCacheEnabled && r.usesWeakMemory
+        return withContext(Dispatchers.IO) {
             val key = "${sourceIdentity(r)}:${source.digest}:$decodeKey"
             val hit = if (source.reusable && !r.refresh) memory.findKey(key, r.readsMemory, weakEnabled) else null
             if (hit != null) {
                 if (hit.weak) weakMemoryHits.incrementAndGet() else memoryHits.incrementAndGet()
-                withContext(Dispatchers.IO) { source.publish() }
+                source.publish(true)
                 memory.put(key, lookupKey, source.expiresAt, hit.value, r.writesMemory, weakEnabled)
                 hit.value
             } else {
@@ -83,8 +150,11 @@ class SvgaEngine(
                         try {
                             decodeCount.incrementAndGet()
                             val resource = source.file.inputStream().use { SvgaResource.decode(it, dir, r.width, r.height, maxDecodedBytes, decodeOptions) }
-                            source.publish()
+                            source.publish(true)
                             resource
+                        } catch (e: Exception) {
+                            if (e !is CancellationException) source.reject()
+                            throw e
                         } finally { dir.deleteRecursively() }
                     }
                 }, { resource ->
@@ -110,7 +180,8 @@ class SvgaEngine(
     }
     private fun sourceKey(r: SvgaRequest) = "${sourceIdentity(r)}:${r.readsDisk}:${r.writesDisk}:${r.cacheOnly}:${r.refresh}:${r.allowStaleOnError}:${r.resumeDownloads}"
 
-    private suspend fun source(r: SvgaRequest, progress: (SvgaDownloadProgress) -> Unit): Source {
+    private suspend fun source(r: SvgaRequest, progress: (SvgaDownloadProgress) -> Unit,
+        rejections: SourceRejections): Source {
         when (val source = r.source) {
             is SvgaSource.LocalFile -> return Source(source.file, digest(source.file), true, false)
             is SvgaSource.Asset -> {
@@ -118,11 +189,12 @@ class SvgaEngine(
                 try { context.assets.open(source.path).use { copy(it, file) }; return Source(file, digest(file), true, true) }
                 catch (e: Throwable) { file.delete(); throw e }
             }
-            is SvgaSource.Remote -> return remote(r, source, progress)
+            is SvgaSource.Remote -> return remote(r, source, progress, rejections)
         }
     }
 
-    private suspend fun remote(r: SvgaRequest, source: SvgaSource.Remote, progress: (SvgaDownloadProgress) -> Unit): Source {
+    private suspend fun remote(r: SvgaRequest, source: SvgaSource.Remote, progress: (SvgaDownloadProgress) -> Unit,
+        rejections: SourceRejections): Source {
         val key = sourceIdentity(r)
         val entry = File(disk, key)
         // Snapshot the entire cache transaction under the same lock used by eviction/publication.
@@ -144,7 +216,7 @@ class SvgaEngine(
             if (meta != null && !r.refresh && (r.cacheOnly || meta.optLong("expires") > now)) {
                 diskHits.incrementAndGet()
                 diskMutex.withLock { entry.setLastModified(now) }
-                return Source(cached!!, meta.getString("digest"), true, true, meta.optLong("expires")).also { cached = null }
+                return diskSource(r, entry, cached!!, meta, rejections, cached = true).also { cached = null }
             }
             check(!r.cacheOnly) { "SVGA cache miss" }
             val builder = Request.Builder().url(source.url)
@@ -177,34 +249,64 @@ class SvgaEngine(
                 val metadata = JSONObject().put("digest", digest).put("expires", expiry).put("control", controlText)
                     .put("etag", res.header("ETag") ?: meta?.optString("etag") ?: "")
                     .put("modified", res.header("Last-Modified") ?: meta?.optString("modified") ?: "")
+                    .put("validated", res.code == 304 && meta?.optBoolean("validated", true) == true)
                 if (noStore) {
                     if (r.writesDisk) diskMutex.withLock { entry.deleteRecursively() }
                     memory.invalidate(key + ":")
                 }
-                var published = false
-                // Publish only AFTER successful decoding. Invalid downloads never become cache hits.
-                return Source(temp, digest, !noStore, true, expiry) {
-                    if (r.writesDisk && !noStore) diskMutex.withLock {
-                        if (!published) {
-                            val next = File(disk, "$key-${java.util.UUID.randomUUID()}.tmp").apply { mkdirs() }
-                            try {
-                                temp.copyTo(File(next, "body"))
-                                File(next, "metadata").writeText(metadata.toString())
-                                entry.deleteRecursively(); check(next.renameTo(entry)); trimDisk(); published = true
-                            } catch (e: IOException) {
-                                android.util.Log.w("SvgaEngine", "Disk cache write failed; using prepared resource", e)
-                            } finally { next.deleteRecursively() }
-                        }
-                    }
-                }
+                return if (noStore) Source(temp, digest, false, true, expiry)
+                else diskSource(r, entry, temp, metadata, rejections, cached = false)
             } catch (e: Throwable) { temp.delete(); throw e }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             if (r.allowStaleOnError && cached != null && meta != null) {
-                return Source(cached!!, meta.getString("digest"), true, true, 0).also { cached = null }
+                return diskSource(r, entry, cached!!, meta, rejections, cached = true, expiresAt = 0).also { cached = null }
             }
             throw e
         } finally { cached?.delete() }
+    }
+
+    private fun diskSource(r: SvgaRequest, entry: File, file: File, metadata: JSONObject,
+        rejections: SourceRejections, cached: Boolean,
+        expiresAt: Long = metadata.optLong("expires")): Source {
+        val digest = metadata.getString("digest")
+        // Legacy entries were only published after decoding, so missing flags mean validated.
+        var validated = metadata.optBoolean("validated", true)
+        var published = cached
+        var publishedValidated = validated
+        fun currentMetadata() = runCatching { JSONObject(File(entry, "metadata").readText()) }.getOrNull()
+        return Source(file, digest, true, true, expiresAt, publish = { parsed ->
+            diskMutex.withLock {
+                val current = currentMetadata()
+                if (current?.optString("digest") == digest && current.optBoolean("validated", true)) validated = true
+                if (parsed) validated = true
+                if (validated) rejections.digests.remove(digest)
+                if (r.writesDisk && digest !in rejections.digests && (!published || (validated && !publishedValidated))) {
+                    // A cached snapshot must not overwrite a newer representation or resurrect an eviction.
+                    if (published && current?.optString("digest") != digest) return@withLock
+                    val next = File(disk, "${entry.name}-${java.util.UUID.randomUUID()}.tmp").apply { mkdirs() }
+                    try {
+                        file.copyTo(File(next, "body"))
+                        File(next, "metadata").writeText(metadata.put("validated", validated).toString())
+                        entry.deleteRecursively(); check(next.renameTo(entry)); trimDisk()
+                        published = true; publishedValidated = validated
+                    } catch (e: IOException) {
+                        android.util.Log.w("SvgaEngine", "Disk cache write failed; using downloaded source", e)
+                    } finally { next.deleteRecursively() }
+                }
+            }
+        }, reject = {
+            diskMutex.withLock {
+                if (!validated) {
+                    rejections.digests.add(digest)
+                    val current = currentMetadata()
+                    if (current?.optString("digest") == digest && !current.optBoolean("validated", true)) {
+                        entry.deleteRecursively()
+                        published = false
+                    }
+                }
+            }
+        })
     }
 
     suspend fun clearDisk() = withContext(Dispatchers.IO) {

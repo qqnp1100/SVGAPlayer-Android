@@ -185,6 +185,37 @@ val request = SvgaRequest(
 
 引擎默认内存 32 MiB、磁盘 128 MiB、下载并发 4、解码并发 2、单次解码像素预算 128 MiB；可在构造时修改。内存计费包含实际 Bitmap 分配量、音频字节及帧对象估算。提供 `clearMemory()`、挂起的 `clearDisk()`、`preload(request)`（准备完整资源）和诊断计数器。
 
+### 预下载
+
+`preDownload` 默认仅流式下载原始 SVGA 文件到磁盘，不解压、不解析、不解码图片，也不生成或登记解码资源到强缓存或弱索引。下载过程使用小块缓冲，不把整个文件保存在内存中。引擎和 `SvgaImageLoader` 均提供挂起接口：
+
+```kotlin
+val engine = SvgaEngine(
+    context,
+    downloadConcurrency = 4,    // 正常加载与预下载共享的总下载上限
+    preDownloadConcurrency = 2, // 预下载发起的独立来源任务上限，默认 2
+)
+val request = SvgaRequest(giftUrl).copy(cachePolicy = SvgaCachePolicy.DISK)
+
+// 默认只下载并保存原始文件，展示时再解析。
+engine.preDownload(request)
+
+// 下载完成后准备资源；DISK 策略仍不缓存解码资源到内存。
+engine.preDownload(request, parseAfterDownload = true)
+
+// 如需同时预热资源内存缓存，使用 ALL；尺寸应与展示请求一致。
+engine.preDownload(request.copy(cachePolicy = SvgaCachePolicy.ALL), parseAfterDownload = true)
+
+// 使用现有 loader，无需经过 Coil 的图片解码流程。
+loader.preDownload(request, parseAfterDownload = false) { progress -> /* 下载进度 */ }
+```
+
+下载完成后的解析默认关闭；开启后使用与正常加载相同的解码流程，受 `decodeConcurrency` 限制，内存缓存读写遵循请求的强/弱缓存配置。磁盘始终保存原始文件和 HTTP 元数据，不序列化 Bitmap 或已解码资源；`preload` 保持原有准备完整资源的行为。
+
+同一个引擎内，预下载与正常加载沿用相同来源身份和共享任务。完整 URL、版本、namespace、请求头以及网络/磁盘读写策略兼容时，共用一次下载；不同尺寸或内存缓存配置不额外下载。同解码规格且兼容策略的解析进一步合并。并发额度由实际来源生产任务占用，重复订阅不会占用额外额度；超出上限的任务挂起排队。正常加载新来源不受预下载单独上限约束，但加入已排队的同来源预下载时等待其共享任务。取消一个订阅者不会中断其他订阅者，仅最后一个离开时取消生产任务；符合条件的部分正文仍可用于断点续传。
+
+预下载遵循 `diskRead` / `diskWrite`、磁盘预算和 HTTP 新鲜度规则：禁止磁盘写入、`no-store` 或超出缓存容量时，不保证留存可复用文件；过期文件在正常加载时仍需条件验证，`cacheOnly = true` 可禁止网络。只下载的文件标记为尚未解析验证，首次成功解析后升级标记，解析失败则清理对应未验证缓存，防止后续加载反复命中坏文件。并发的晚到预下载结果不会把已拒绝的正文重新写回缓存。
+
 自定义实例通过 `SvgaImageLoader(context, engine)` 注入两种入口；默认使用共享实例，不覆盖宿主 Coil SingletonImageLoader。基础资源使用有容量上限的强引用 LRU、弱引用索引和 GC 所有权，不放入 Coil 通用内存缓存；会话 clear 和缓存淘汰不会 recycle 仍被另一个实例使用的基础 Bitmap。引擎不保证跨进程下载去重。
 
 ## 核心改动

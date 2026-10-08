@@ -39,6 +39,10 @@ class SvgaImageLoader(context: Context, val engine: SvgaEngine = SvgaEngine.get(
             is ErrorResult -> throw result.throwable
         }
     }
+    /** Download ahead of display; optionally decode using the request's resource cache policy. */
+    suspend fun preDownload(request: SvgaRequest, parseAfterDownload: Boolean = false,
+        onDownloadProgress: (suspend (SvgaDownloadProgress) -> Unit)? = request.onDownloadProgress) =
+        engine.preDownload(request, parseAfterDownload, onDownloadProgress)
     override fun close() = imageLoader.shutdown()
     companion object {
         @Volatile private var shared: SvgaImageLoader? = null
