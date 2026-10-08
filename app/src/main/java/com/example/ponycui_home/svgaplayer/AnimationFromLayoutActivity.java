@@ -6,6 +6,7 @@ import androidx.appcompat.app.AppCompatActivity;
 /**
  * Created by cuiminghui on 2017/3/30.
  * 将 svga 文件打包到 assets 文件夹中，然后使用 layout.xml 加载动画。
+ * SampleApplication 将 XML 的 app:source 接入 3.0.0 loadSvga 加载器。
  */
 
 public class AnimationFromLayoutActivity extends AppCompatActivity {

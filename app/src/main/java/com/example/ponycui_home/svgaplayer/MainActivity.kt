@@ -12,8 +12,6 @@ import android.widget.ListAdapter
 import android.widget.ListView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import com.opensource.svgaplayer.SVGACache
-import com.opensource.svgaplayer.SVGAParser.Companion.shareParser
 import com.opensource.svgaplayer.utils.log.SVGALogger.setLogEnabled
 
 class SampleItem(var title: String, var intent: Intent)
@@ -24,7 +22,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setupData()
         setupListView()
-        setupSVGAParser()
         setupLogger()
         setContentView(listView)
     }
@@ -127,11 +124,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         listView?.setBackgroundColor(Color.WHITE)
-    }
-
-    fun setupSVGAParser() {
-        SVGACache.onCreate(this, SVGACache.Type.FILE)
-        shareParser().init(this)
     }
 
     private fun setupLogger() {
