@@ -1,2 +1,2 @@
 include ':app', ':library'
-include ':svga-loader', ':svga-coil3', ':svga-compose'
+include ':svga-loader', ':svga-coil3', ':svga-glide5', ':svga-compose'

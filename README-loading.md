@@ -58,6 +58,7 @@ svgaView.setVideoItem(videoItem)
 | `library` | `svga-core` | 旧 API、只读资源、渲染器、播放时钟、实例音频 |
 | `svga-loader` | `svga-loader` | URL / File / Assets、并发去重、缓存、取消、预加载 |
 | `svga-coil3` | `svga-coil3` | Coil 3.3.0 Fetcher、独立 ImageLoader、View 扩展、填充 |
+| `svga-glide5` | `svga-glide5` | Glide 5.0.7 ModelLoader、View 扩展、动态图片填充 |
 | `svga-compose` | `svga-compose` | 原生 Compose 组件、状态、生命周期与交互 |
 
 3.0.0 通过 JitPack 远程接入。以下以发布 Tag `3.0.0-beta1` 为例，版本号需与实际 Git Tag 完全一致（包括可能的 `v` 前缀）。当前构建使用 Kotlin 2.2.0、AGP 8.12.0、compileSdk 35、minSdk 21；库字节码目标为 Java 17。
@@ -86,7 +87,47 @@ implementation("com.github.qqnp1100.SVGAPlayer-Android:svga-coil3:3.0.0-beta1") 
 implementation("com.github.qqnp1100.SVGAPlayer-Android:svga-compose:3.0.0-beta1") // Compose
 ```
 
-仅使用 View 时选择 `svga-coil3`，不会引入 Compose；Compose 项目选择 `svga-compose` 并启用宿主的 Compose 编译插件。所需下层模块会自动引入。JitPack 构建并发布对应 Tag 后即可远程解析；本仓库内示例仍使用 `implementation(project(":svga-coil3"))` 或 `implementation(project(":svga-compose"))`。
+仅使用 View 时选择 `svga-coil3` 或 `svga-glide5`，不会引入 Compose；Compose 项目选择 `svga-compose` 并启用宿主的 Compose 编译插件。所需下层模块会自动引入。JitPack 构建并发布对应 Tag 后即可远程解析；本仓库内示例仍使用 `implementation(project(":svga-coil3"))` 或 `implementation(project(":svga-compose"))`。
+
+### Glide 5 接入
+
+```kotlin
+implementation("com.github.qqnp1100.SVGAPlayer-Android:svga-glide5:3.0.0-beta1")
+// 仓库内使用 implementation(project(":svga-glide5"))。
+```
+
+模块使用 Glide 5.0.7，保留 Android 21 支持；Glide 5.0.8/5.0.9 要求 Android 23。
+
+```kotlin
+import com.opensource.svgaplayer.glide5.SvgaImageLoader
+import com.opensource.svgaplayer.glide5.loadSvga
+import com.opensource.svgaplayer.glide5.clearSvga
+import com.opensource.svgaplayer.glide5.svgaBindings
+
+val handle = svgaView.loadSvga(giftUrl) {
+    iterations = 1
+    bindings = svgaBindings {
+        text("user_name", "小明")
+        image("avatar", avatarUrl, circleCrop = true)
+    }
+    onReady = { }
+    onError = { error -> /* 处理错误 */ }
+}
+handle.pause()
+handle.resume()
+svgaView.clearSvga()
+
+// 在协程中加载或预下载。
+val loader = SvgaImageLoader.get(context)
+val resource = loader.load(SvgaRequest(giftUrl))
+loader.preDownload(SvgaRequest(giftUrl), parseAfterDownload = false)
+```
+
+Glide View 入口提供与 Coil View 入口同名的选项和 handle，包含静态首帧、动态填充更新、下载进度、取消、detach 清理和重新 attach。按所用模块导入对应包，避免同名扩展冲突。Compose 入口继续使用 `svga-compose`。
+
+SVGA 请求通过 Glide ModelLoader 进入共享 `SvgaEngine`，遵守 `SvgaRequest` 的缓存、请求头、尺寸与解码选项；每次订阅独立取消和接收进度。SVGA 外层 Glide 缓存关闭，缓存与请求合并由引擎负责。普通动态图片使用宿主的 Glide 配置，无需额外声明 AppGlideModule 或注解处理器；库仅注册自己的模型类型。
+
+动态图片按图层实际区域请求，保持来源比例，最长边上限 1024 px，`size` 可指定更小上限，支持圆形裁剪与可选失败。Glide 结果复制为实例独占的软件 Bitmap，替换绑定或释放实例时回收；业务直接传入的 Bitmap 仍为借用。`loader.close()` 取消该加载器的加载和预下载，不关闭共享引擎或宿主 Glide。
 
 ## View
 

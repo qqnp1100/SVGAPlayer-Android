@@ -77,6 +77,13 @@ class SVGADynamicEntity {
         replaceBitmap(forKey, bitmap, dynamicOutImage, ownedByLibrary = false)
     }
 
+    /** Transfers exclusive ownership; replacement and clearDynamicObjects recycle these pixels. */
+    @Synchronized fun setOwnedDynamicImage(bitmap: Bitmap, forKey: String) {
+        require(!bitmap.isRecycled) { "Cannot bind a recycled Bitmap" }
+        this.isClean = false
+        replaceBitmap(forKey, bitmap, dynamicOutImage, ownedByLibrary = true)
+    }
+
     fun getDynamicImage(key: String): Bitmap? {
         return dynamicInImage[key] ?: dynamicOutImage[key]
     }
