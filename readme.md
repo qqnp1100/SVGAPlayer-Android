@@ -255,9 +255,9 @@ svgaView.loadSvga(giftUrl) {
 
 ## 加载与缓存流程
 
-下图使用内置 imagegen 生成，描述 3.0.0 统一加载器的主流程（View 与 Compose 共用）：
+下图使用 Diagram Design 绘制，描述 3.0.0 统一加载器的主流程（View 与 Compose 共用）；
 
-![SVGA 3.0.0 加载与缓存流程：强 LRU、弱索引、来源合并、磁盘与 HTTP、解码发布及独立展示会话](./docs/images/svga-3.0.0-loading-cache.png)
+![SVGA 3.0.0 加载与缓存流程：强 LRU、弱索引、来源合并、磁盘与 HTTP、解码发布及独立展示会话](./docs/images/svga-3.0.0-loading-cache.svg)
 
 - 内存查询顺序为强 LRU → 弱索引；只查询请求开启的层，并检查来源身份、解码规格和 HTTP 新鲜度。`cacheOnly` 可接受已有过期缓存；`refresh` 会失效并绕过两层内存快速命中，且不复用旧正文或续传片段。
 - 未命中后合并兼容的来源请求。URL 先读完整磁盘正文；过期时使用 ETag / Last-Modified 条件校验，304 复用正文，200 或校验通过的 206 获取完整正文。Assets 与 File 直接读本地来源，不经过 HTTP 磁盘缓存。
