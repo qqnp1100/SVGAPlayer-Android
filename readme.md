@@ -13,12 +13,13 @@
 
 ## JitPack 远程接入
 
-| 模块 | JitPack artifactId | 使用场景 |
-| --- | --- | --- |
-| `library` | `svga-core` | 核心渲染、播放控制及旧 API |
-| `svga-loader` | `svga-loader` | 下载、缓存、取消和预加载 |
-| `svga-coil3` | `svga-coil3` | View 快捷加载、Coil 3 动态图片填充 |
-| `svga-compose` | `svga-compose` | 原生 Compose 组件和状态管理 |
+| 模块             | JitPack artifactId | 使用场景                     |
+|----------------| --- |--------------------------|
+| `library`      | `svga-core` | 核心渲染、播放控制及旧 API          |
+| `svga-loader`  | `svga-loader` | 下载、缓存、取消和预加载             |
+| `svga-coil3`   | `svga-coil3` | View 快捷加载、Coil 3 动态图片填充  |
+| `svga-glide5`  | `svga-glide5` | View 快捷加载、Glide 5 动态图片填充 |
+| `svga-compose` | `svga-compose` | 原生 Compose 组件和状态管理       |
 
 最低支持 Android 21，Java 字节码目标为 17；使用 Compose 模块时需启用宿主的 Compose 编译插件。在宿主项目中加入 JitPack 仓库：
 
