@@ -13,6 +13,7 @@ import android.view.View
 import android.widget.ImageView
 import com.opensource.svgaplayer.entities.SVGAAudioEntity
 import com.opensource.svgaplayer.entities.SVGAVideoSpriteEntity
+import com.opensource.svgaplayer.entities.SvgaFramePool
 import com.opensource.svgaplayer.bitmap.SvgaImageDecoder
 import com.opensource.svgaplayer.bitmap.SvgaImageSize
 import com.opensource.svgaplayer.proto.AudioEntity
@@ -59,6 +60,8 @@ class SVGAVideoEntity {
 
     internal var scaleMap = HashMap<String, Pair<Float, Float>>()
     internal var spriteList: List<SVGAVideoSpriteEntity> = emptyList()
+    internal var frameStorageBytes = 0L
+        private set
     internal var audioList: List<SVGAAudioEntity> = emptyList()
     internal var soundPool: SoundPool? = null
     private var soundCallback: SVGASoundManager.SVGASoundCallBack? = null
@@ -88,6 +91,7 @@ class SVGAVideoEntity {
         FPS = resource.FPS
         frames = resource.frames
         spriteList = resource.spriteList
+        frameStorageBytes = resource.frameStorageBytes
         imageMap.putAll(resource.imageMap)
         deferredImages = resource.deferredImageSources.takeIf { it.isNotEmpty() }?.let {
             SvgaDeferredImages(it.toMap(), resource.deferredImageBudget)
@@ -332,11 +336,12 @@ class SVGAVideoEntity {
     }
 
     private fun resetSprites(json: JSONObject) {
+        val pool = SvgaFramePool()
         val mutableList: MutableList<SVGAVideoSpriteEntity> = mutableListOf()
         json.optJSONArray("sprites")?.let { item ->
             for (i in 0 until item.length()) {
                 item.optJSONObject(i)?.let { entryJson ->
-                    val entity = SVGAVideoSpriteEntity(entryJson)
+                    val entity = SVGAVideoSpriteEntity(entryJson, pool)
                     var matrixMaxScaleX = 1f
                     var matrixMaxScaleY = 1f
                     val f = FloatArray(9)
@@ -357,13 +362,15 @@ class SVGAVideoEntity {
             }
         }
         spriteList = mutableList.toList()
+        frameStorageBytes = pool.estimatedBytes(spriteList.sumOf { it.frames.size.toLong() })
     }
 
     private fun resetSprites(entity: MovieEntity) {
+        val pool = SvgaFramePool()
         spriteList = entity.sprites?.map {
             var matrixMaxScaleX = 1f
             var matrixMaxScaleY = 1f
-            val entity = SVGAVideoSpriteEntity(it)
+            val entity = SVGAVideoSpriteEntity(it, pool)
             val f = FloatArray(9)
             entity.frames.forEach { e ->
                 e.transform.getValues(f)
@@ -379,6 +386,7 @@ class SVGAVideoEntity {
             scaleMap[entity.imageKey ?: ""] = Pair(matrixMaxScaleX, matrixMaxScaleY)
             return@map entity
         } ?: listOf()
+        frameStorageBytes = pool.estimatedBytes(spriteList.sumOf { it.frames.size.toLong() })
     }
 
     private fun setupAudios(entity: MovieEntity, completionBlock: () -> Unit) {
@@ -572,6 +580,7 @@ class SVGAVideoEntity {
         audioList = emptyList()
         if (!sharesResources) spriteList.forEach { it.clear() }
         spriteList = emptyList()
+        frameStorageBytes = 0L
         synchronized(imageMap) {
             if (!sharesResources) imageMap.forEach { SVGAParser.getBitmapDecoder().onClean(it.value) }
             imageMap.clear()

@@ -27,7 +27,7 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
     val layerKeys: List<String> get() = data.spriteList.mapNotNull { it.imageKey }.filterNot { it.endsWith(".matte") }.distinct()
     val sizeBytes: Long get() = audioTracks.sumOf { it.bytes.size.toLong() } + data.imageMap.values.sumOf { it.allocationByteCount.toLong() } +
         data.deferredImageSources.values.sumOf { it.bytes.size.toLong() } +
-        data.spriteList.sumOf { it.frames.size.toLong() * 256 } + 1024
+        data.frameStorageBytes + 1024
     fun newVideoEntity(): SVGAVideoEntity = SVGAVideoEntity(data).also { it.resource = this }
     fun layerSize(key: String): android.util.Size? {
         val sprite = data.spriteList.firstOrNull { it.imageKey?.removeSuffix(".matte") == key } ?: return null
@@ -194,6 +194,8 @@ class SvgaRenderer internal constructor(private val video: SVGAVideoEntity, val 
     private var viewportWidth = 0
     private var viewportHeight = 0
     private val inverse = android.graphics.Matrix()
+    private val hitTransform = android.graphics.Matrix()
+    private val hitTransformValues = FloatArray(9)
     private val point = FloatArray(2)
     val hasActiveScrollingText get() = drawer.hasActiveScrollingText
     fun prepare(width: Int, height: Int) {
@@ -222,7 +224,9 @@ class SvgaRenderer internal constructor(private val video: SVGAVideoEntity, val 
             val key = sprite.imageKey ?: continue
             if (key.endsWith(".matte") || bindings.dynamicHidden[key] == true) continue
             val frame = sprite.frames.getOrNull(drawnFrame) ?: continue
-            if (frame.alpha <= 0 || !frame.transform.invert(inverse)) continue
+            if (frame.alpha <= 0) continue
+            frame.transform.copyTo(hitTransform, hitTransformValues)
+            if (!hitTransform.invert(inverse)) continue
             point[0] = x * video.videoSize.width.toFloat() / viewportWidth
             point[1] = y * video.videoSize.height.toFloat() / viewportHeight
             inverse.mapPoints(point)

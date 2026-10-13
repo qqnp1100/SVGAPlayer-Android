@@ -10,6 +10,7 @@ import com.opensource.svgaplayer.SVGADynamicImage
 import com.opensource.svgaplayer.SVGASoundManager
 import com.opensource.svgaplayer.SVGAVideoEntity
 import com.opensource.svgaplayer.entities.SVGAVideoShapeEntity
+import com.opensource.svgaplayer.entities.SvgaFrameTransform
 import com.opensource.svgaplayer.utils.log.LogUtils
 
 /**
@@ -41,6 +42,8 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
     private val matteSprites: HashMap<String, SVGADrawerSprite> = hashMapOf()
     private val matrixValues = FloatArray(9)
     private val clickMatrixValues = FloatArray(9)
+    private val frameTransformMatrix = Matrix()
+    private var copiedFrameTransform: SvgaFrameTransform? = null
 
     private var mySoundId: Int? = null
     private var textCacheCanvasWidth: Int = 0
@@ -158,11 +161,15 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         }
     }
 
-    private fun shareFrameMatrix(transform: Matrix): Matrix {
+    private fun shareFrameMatrix(transform: SvgaFrameTransform): Matrix {
         val matrix = this.sharedValues.sharedMatrix()
         matrix.postScale(scaleInfo.scaleFx, scaleInfo.scaleFy)
         matrix.postTranslate(scaleInfo.tranFx, scaleInfo.tranFy)
-        matrix.preConcat(transform)
+        if (copiedFrameTransform !== transform) {
+            transform.copyTo(frameTransformMatrix, matrixValues)
+            copiedFrameTransform = transform
+        }
+        matrix.preConcat(frameTransformMatrix)
         return matrix
     }
 
