@@ -17,11 +17,14 @@ import android.view.animation.LinearInterpolator
 import androidx.appcompat.widget.AppCompatImageView
 import com.opensource.svgaplayer.utils.SVGARange
 import com.opensource.svgaplayer.utils.log.LogUtils
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.Closeable
 import java.lang.ref.WeakReference
 import java.net.URL
@@ -91,6 +94,8 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     private var scope: CloseableCoroutineScope? = null
+    private var imageLoadJob: Job? = null
+    private var imageLoadVersion = 0L
     private var pendingLoadDrawable: SVGADrawable? = null
     private var isStaticVideoItem = false
     private var isViewVisible = true
@@ -343,6 +348,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     override fun setImageDrawable(drawable: Drawable?) {
+        cancelImageLoading()
         modernPlayback?.close(); modernPlayback = null
         getSVGADrawable()?.setTextScrollEnabled(false)
         isStaticVideoItem = false
@@ -402,32 +408,40 @@ open class SVGAImageView @JvmOverloads constructor(
 
     private fun startLoadDrawable(drawable: SVGADrawable) {
         pendingLoadDrawable = null
-        startLoadVideoItemImage(drawable.videoItem)
-        startLoadDynamicItemImage(drawable.dynamicItem)
-    }
-
-    private fun startLoadVideoItemImage(videoItem: SVGAVideoEntity) {
-        scope?.launch {
-            videoItem.parserImages(this@SVGAImageView)
-            parserImagesEndCallBack?.invoke()
-            launch(Dispatchers.Main) {
-                updateSvagDrawable()
+        cancelImageLoading()
+        val version = imageLoadVersion
+        imageLoadJob = scope?.launch {
+            launch {
+                drawable.videoItem.parserImages(this@SVGAImageView)
+                withContext(Dispatchers.Main.immediate) {
+                    if (!isCurrentImageLoad(drawable, version)) return@withContext
+                    parserImagesEndCallBack?.invoke()
+                    // The callback may replace or clear the presentation itself.
+                    if (isCurrentImageLoad(drawable, version)) updateSvagDrawable()
+                }
+            }
+            launch {
+                try {
+                    drawable.dynamicItem.requestDynamicImage(this@SVGAImageView)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                }
+                withContext(Dispatchers.Main.immediate) {
+                    if (isCurrentImageLoad(drawable, version)) updateSvagDrawable()
+                }
             }
         }
     }
 
-    private fun startLoadDynamicItemImage(dynamicItem: SVGADynamicEntity?) {
-        dynamicItem ?: return
-        scope?.launch {
-            try {
-                dynamicItem.requestDynamicImage(this@SVGAImageView)
-            } catch (e: Exception) {
-            }
-            launch(Dispatchers.Main) {
-                updateSvagDrawable()
-            }
-        }
+    private fun cancelImageLoading() {
+        ++imageLoadVersion
+        imageLoadJob?.cancel()
+        imageLoadJob = null
     }
+
+    private fun isCurrentImageLoad(drawable: SVGADrawable, version: Long) =
+        version == imageLoadVersion && this.drawable === drawable && isAttachedToWindow
 
     private fun updateSvagDrawable() {
         if (isAnimating) {
@@ -511,6 +525,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         modernPlayback?.close(); modernPlayback = null
+        cancelImageLoading()
         scope?.close()
         scope = null
         if (isAddOnPreDraw) {
