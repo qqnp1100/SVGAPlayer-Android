@@ -47,6 +47,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
     private var textCacheCanvasHeight: Int = 0
     private var frameTimeNanos = 0L
 
+    @Volatile
     var hasActiveScrollingText = false
         private set
 
@@ -57,6 +58,10 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         renderFrame(canvas, frameIndex, scaleType, canvas.width, canvas.height, System.nanoTime(), true)
     }
 
+    // A worker can prepare the same drawer that a View draws. Protect the entire frame,
+    // including sprite pooling and caches, rather than individual Path operations.
+    // Presentation owners use this same monitor when releasing their video/bindings.
+    @Synchronized
     fun renderFrame(canvas: Canvas, frameIndex: Int, scaleType: ImageView.ScaleType,
                     width: Int, height: Int, timeNanos: Long, legacyAudio: Boolean = false) {
         viewportWidth = width
@@ -229,6 +234,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         this.drawTextCache.clear()
     }
 
+    @Synchronized
     fun clearCaches() {
         clearTextBitmapCaches()
         this.frameChangeGate.clear()
@@ -236,6 +242,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         this.sharedValues.clear()
     }
 
+    @Synchronized
     fun pauseTextScrolling() {
         hasActiveScrollingText = false
         scrollTimeline.pause()

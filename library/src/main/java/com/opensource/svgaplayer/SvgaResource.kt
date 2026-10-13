@@ -190,46 +190,61 @@ internal data class SvgaAudioTrack(val bytes: ByteArray, val startFrame: Int, va
 /** Platform-neutral viewport contract; no View is created by this renderer. */
 class SvgaRenderer internal constructor(private val video: SVGAVideoEntity, val bindings: SVGADynamicEntity) : AutoCloseable {
     private val drawer = SVGACanvasDrawer(video, bindings)
+    @Volatile private var released = false
     private var drawnFrame = -1
     private var viewportWidth = 0
     private var viewportHeight = 0
     private val inverse = android.graphics.Matrix()
     private val point = FloatArray(2)
-    val hasActiveScrollingText get() = drawer.hasActiveScrollingText
+    val hasActiveScrollingText get() = !released && drawer.hasActiveScrollingText
     fun prepare(width: Int, height: Int) {
+        if (released) return
         video.deferredImages?.prepare(0)
-        val picture = android.graphics.Picture()
-        val canvas = picture.beginRecording(width, height)
-        try { drawer.renderFrame(canvas, 0, ImageView.ScaleType.FIT_XY, width, height, 0) }
-        finally { picture.endRecording() }
+        synchronized(drawer) {
+            if (released) return
+            val picture = android.graphics.Picture()
+            val canvas = picture.beginRecording(width, height)
+            try { drawer.renderFrame(canvas, 0, ImageView.ScaleType.FIT_XY, width, height, 0) }
+            finally { picture.endRecording() }
+        }
     }
     fun draw(canvas: Canvas, width: Int, height: Int, frame: Int, timeNanos: Long) {
-        if (width <= 0 || height <= 0) return
-        video.deferredImages?.prepare(frame)
-        viewportWidth = width; viewportHeight = height; drawnFrame = frame
-        val save = canvas.save()
-        try {
-            canvas.clipRect(0, 0, width, height)
-            drawer.renderFrame(canvas, frame, ImageView.ScaleType.FIT_XY, width, height, timeNanos)
-        } finally { canvas.restoreToCount(save) }
-        video.deferredImages?.afterDraw(frame, canvas)
+        synchronized(drawer) {
+            if (released || width <= 0 || height <= 0) return
+            video.deferredImages?.prepare(frame)
+            viewportWidth = width; viewportHeight = height; drawnFrame = frame
+            val save = canvas.save()
+            try {
+                canvas.clipRect(0, 0, width, height)
+                drawer.renderFrame(canvas, frame, ImageView.ScaleType.FIT_XY, width, height, timeNanos)
+            } finally { canvas.restoreToCount(save) }
+            video.deferredImages?.afterDraw(frame, canvas)
+        }
     }
     /** Hit test the last displayed frame, inverse-transforming rotated/mirrored layers. */
     fun hitTest(x: Float, y: Float): String? {
-        if (drawnFrame < 0) return null
-        for (index in video.spriteList.indices.reversed()) {
-            val sprite = video.spriteList[index]
-            val key = sprite.imageKey ?: continue
-            if (key.endsWith(".matte") || bindings.dynamicHidden[key] == true) continue
-            val frame = sprite.frames.getOrNull(drawnFrame) ?: continue
-            if (frame.alpha <= 0 || !frame.transform.invert(inverse)) continue
-            point[0] = x * video.videoSize.width.toFloat() / viewportWidth
-            point[1] = y * video.videoSize.height.toFloat() / viewportHeight
-            inverse.mapPoints(point)
-            if (point[0] >= 0 && point[1] >= 0 && point[0] < frame.layout.width && point[1] < frame.layout.height) return key
+        synchronized(drawer) {
+            if (released || drawnFrame < 0) return null
+            for (index in video.spriteList.indices.reversed()) {
+                val sprite = video.spriteList[index]
+                val key = sprite.imageKey ?: continue
+                if (key.endsWith(".matte") || bindings.dynamicHidden[key] == true) continue
+                val frame = sprite.frames.getOrNull(drawnFrame) ?: continue
+                if (frame.alpha <= 0 || !frame.transform.invert(inverse)) continue
+                point[0] = x * video.videoSize.width.toFloat() / viewportWidth
+                point[1] = y * video.videoSize.height.toFloat() / viewportHeight
+                inverse.mapPoints(point)
+                if (point[0] >= 0 && point[1] >= 0 && point[0] < frame.layout.width && point[1] < frame.layout.height) return key
+            }
+            return null
         }
-        return null
     }
     fun pause() = drawer.pauseTextScrolling()
-    override fun close() { drawer.clearCaches(); video.clear(); bindings.clearDynamicObjects() }
+    override fun close() {
+        synchronized(drawer) {
+            if (released) return
+            released = true
+            drawer.clearCaches(); video.clear(); bindings.clearDynamicObjects()
+        }
+    }
 }

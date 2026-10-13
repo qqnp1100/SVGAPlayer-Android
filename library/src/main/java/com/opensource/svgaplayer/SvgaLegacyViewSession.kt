@@ -60,8 +60,8 @@ internal class SvgaLegacyViewSession(
     fun resume() {
         if (closed) return
         playing = true; view.isAnimating = true
-        drawable.cleared = false
         if (prepared) {
+            drawable.cleared = false
             if (view.loops != 1 && !drawable.areAllImagesReady()) {
                 frameJob?.cancel()
                 frameJob = scope.launch {
@@ -76,6 +76,9 @@ internal class SvgaLegacyViewSession(
             return
         }
         if (prepareJob?.isActive == true) return
+        // The drawable is already attached to its View. Keep it hidden while the worker
+        // builds render caches; the drawable's render lock also covers seek/clear races.
+        drawable.cleared = true
         prepareJob = scope.launch {
             val sound = SvgaAudioSession(view.context, resource)
             try {
@@ -92,9 +95,13 @@ internal class SvgaLegacyViewSession(
                 audio = sound
                 prepared = true
                 drawable.invalidateSelf()
-                if (playing) schedule()
+                if (playing) { drawable.cleared = false; schedule() }
             } catch (e: CancellationException) { sound.close(); throw e }
-            catch (e: Exception) { sound.close(); prepared = true; if (playing) schedule() }
+            catch (e: Exception) {
+                sound.close()
+                prepared = true
+                if (playing) { drawable.cleared = false; schedule() }
+            }
         }
     }
     private fun schedule() {
