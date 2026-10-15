@@ -48,8 +48,8 @@ class SVGADynamicEntity {
         hashMapOf()
 
     //点击事件回调map
-    internal var mClickMap: HashMap<String, IntArray> = hashMapOf()
-    internal var dynamicIClickArea: HashMap<String, IClickAreaListener> = hashMapOf()
+    internal var mClickMap: MutableMap<String, IntArray> = ConcurrentHashMap()
+    internal var dynamicIClickArea: MutableMap<String, IClickAreaListener> = ConcurrentHashMap()
 
     internal var dynamicDrawerSized: HashMap<String, (canvas: Canvas, frameIndex: Int, width: Int, height: Int) -> Boolean> =
         hashMapOf()
@@ -304,41 +304,18 @@ class SVGADynamicEntity {
 
     @Deprecated("Deprecated since 3.0.0. Retained for legacy View click areas; Compose supports SvgaView.onLayerClick.")
     fun setClickArea(clickKey: List<String>) {
-        for (itemKey in clickKey) {
-            dynamicIClickArea.put(itemKey, object : IClickAreaListener {
-                override fun onResponseArea(key: String, x0: Int, y0: Int, x1: Int, y1: Int) {
-                    mClickMap.let {
-                        if (it.get(key) == null) {
-                            it.put(key, intArrayOf(x0, y0, x1, y1))
-                        } else {
-                            it.get(key)?.let {
-                                it[0] = x0
-                                it[1] = y0
-                                it[2] = x1
-                                it[3] = y1
-                            }
-                        }
-                    }
-                }
-            })
-        }
+        clickKey.forEach { setClickArea(it) }
     }
 
     @Deprecated("Deprecated since 3.0.0. Retained for legacy View click areas; Compose supports SvgaView.onLayerClick.")
     fun setClickArea(clickKey: String) {
         dynamicIClickArea.put(clickKey, object : IClickAreaListener {
             override fun onResponseArea(key: String, x0: Int, y0: Int, x1: Int, y1: Int) {
-                mClickMap.let {
-                    if (it.get(key) == null) {
-                        it.put(key, intArrayOf(x0, y0, x1, y1))
-                    } else {
-                        it.get(key)?.let {
-                            it[0] = x0
-                            it[1] = y0
-                            it[2] = x1
-                            it[3] = y1
-                        }
-                    }
+                val previous = mClickMap[key]
+                if (previous == null || previous[0] != x0 || previous[1] != y0 ||
+                    previous[2] != x1 || previous[3] != y1) {
+                    // Publish all coordinates together; touch handling may retain the old region.
+                    mClickMap[key] = intArrayOf(x0, y0, x1, y1)
                 }
             }
         })

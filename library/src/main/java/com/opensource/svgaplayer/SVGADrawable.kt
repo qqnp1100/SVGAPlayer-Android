@@ -14,6 +14,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     constructor(videoItem: SVGAVideoEntity) : this(videoItem, SVGADynamicEntity())
 
+    @Volatile
     var cleared = true
         internal set(value) {
             if (field == value) {
@@ -33,6 +34,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     var scaleType: ImageView.ScaleType = ImageView.ScaleType.MATRIX
 
     private val drawer = SVGACanvasDrawer(videoItem, dynamicItem)
+    @Volatile private var released = false
     private var externalClock = false
     private var presentationTimeNanos = 0L
     private val frameScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -60,15 +62,18 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     /** Prepare text/path caches on a worker before the first visible frame. */
     fun prepare(width: Int, height: Int) {
         prepareFrame(currentFrame)
-        val picture = android.graphics.Picture()
-        val canvas = picture.beginRecording(width, height)
-        try { drawer.renderFrame(canvas, currentFrame, scaleType, width, height, 0L) }
-        finally { picture.endRecording() }
+        synchronized(drawer) {
+            if (released) return
+            val picture = android.graphics.Picture()
+            val canvas = picture.beginRecording(width, height)
+            try { drawer.renderFrame(canvas, currentFrame, scaleType, width, height, 0L) }
+            finally { picture.endRecording() }
+        }
     }
     /** Prepare only this frame's deferred pixels on the caller's worker thread. */
-    fun prepareFrame(frame: Int) { videoItem.deferredImages?.prepare(frame) }
-    fun isFrameReady(frame: Int): Boolean = videoItem.deferredImages?.isReady(frame) != false
-    internal fun prepareAllImages() { videoItem.deferredImages?.prepareAll() }
+    fun prepareFrame(frame: Int) { if (!released) videoItem.deferredImages?.prepare(frame) }
+    fun isFrameReady(frame: Int): Boolean = !released && videoItem.deferredImages?.isReady(frame) != false
+    internal fun prepareAllImages() { if (!released) videoItem.deferredImages?.prepareAll() }
     internal fun areAllImagesReady(): Boolean = videoItem.deferredImages?.allReady() != false
     private var textScrollAttached = true
     private var textScrollVisible = true
@@ -90,6 +95,18 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     }
 
     override fun draw(canvas: Canvas) {
+        // A hidden View must not wait for its initial worker preparation.
+        if (released || cleared) {
+            textScrollTicker.onDraw(false)
+            return
+        }
+        synchronized(drawer) {
+            if (released) return
+            drawLocked(canvas)
+        }
+    }
+
+    private fun drawLocked(canvas: Canvas) {
         if (cleared) {
             textScrollTicker.onDraw(false)
             return
@@ -210,6 +227,15 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     }
 
     fun clear() {
+        synchronized(drawer) {
+            if (released) return
+            released = true
+            cleared = true
+            clearLocked()
+        }
+    }
+
+    private fun clearLocked() {
         frameScope.cancel()
         textScrollTicker.stop()
         drawer.pauseTextScrolling()

@@ -22,7 +22,7 @@ class SvgaEngine(
     client: OkHttpClient = OkHttpClient(),
     downloadConcurrency: Int = 4,
     decodeConcurrency: Int = 2,
-    val maxDecodedBytes: Long = 128L * 1024 * 1024,
+    val maxDecodedBytes: Long = 256L * 1024 * 1024,
     val weakMemoryCacheEnabled: Boolean = true,
     preDownloadConcurrency: Int = 2,
 ) : AutoCloseable {
