@@ -25,6 +25,8 @@
         <activity android:exported="false" android:name=".AnimationFromLayoutActivity" />
         <activity android:exported="false" android:name=".AnimationFromClickActivity" />
         <activity android:exported="false" android:name=".AnimationFromNetworkActivity" />
+        <activity android:exported="false" android:name=".SvgaLoadTestActivity"
+            android:windowSoftInputMode="adjustResize" />
         <activity android:exported="true" android:name=".SvgaModernActivity" />
     </application>
 

@@ -27,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun setupData() {
+        items.add(SampleItem("SVGA 加载配置测试", Intent(this, SvgaLoadTestActivity::class.java)))
         items.add(SampleItem("Native Compose / Coil 3", Intent(this, SvgaModernActivity::class.java)))
         items.add(SampleItem("View / Coil 3", Intent(this, SvgaModernActivity::class.java).putExtra("view", true)))
         items.add(
