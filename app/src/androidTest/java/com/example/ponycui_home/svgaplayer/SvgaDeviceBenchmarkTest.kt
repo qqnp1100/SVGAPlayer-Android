@@ -80,6 +80,7 @@ class SvgaDeviceBenchmarkTest {
         val loader = SvgaImageLoader(context, engine)
         var previousFrame = -1; var draws = 0; var maxGap = 0L
         var firstDraw = 0L; var lastDraw = 0L
+        var peakBitmapBytes = 0L
         lateinit var view: SVGAImageView
         val output = File(context.getExternalFilesDir(null), "benchmark-$id-$enabled.json")
         try {
@@ -89,7 +90,9 @@ class SvgaDeviceBenchmarkTest {
                     view = object : SVGAImageView(activity) {
                         override fun onDraw(canvas: Canvas) {
                             super.onDraw(canvas)
-                            val frame = (drawable as? SVGADrawable)?.currentFrame ?: return
+                            val presentation = drawable as? SVGADrawable ?: return
+                            peakBitmapBytes = maxOf(peakBitmapBytes, presentation.videoItem.imageMapSize().toLong())
+                            val frame = presentation.currentFrame
                             if (frame != previousFrame) {
                                 val time = now()
                                 if (lastDraw > 0) maxGap = maxOf(maxGap, time - lastDraw)
@@ -141,6 +144,7 @@ class SvgaDeviceBenchmarkTest {
                     try {
                         scenario.onActivity {
                             previousFrame = -1; draws = 0; maxGap = 0; firstDraw = 0; lastDraw = 0
+                            peakBitmapBytes = 0L
                             cpuStart = Process.getElapsedCpuTime(); started = now(); phase.set(1)
                             view.loadSvga(SvgaRequest(SvgaSource.LocalFile(sample), width, height)) {
                                 this.loader = loader
@@ -150,6 +154,7 @@ class SvgaDeviceBenchmarkTest {
                                 onReady = {
                                     ready = now(); cpuReady = Process.getElapsedCpuTime(); phase.set(2)
                                     val video = (view.drawable as SVGADrawable).videoItem
+                                    peakBitmapBytes = maxOf(peakBitmapBytes, video.imageMapSize().toLong())
                                     frames = video.frames; fps = video.FPS
                                     sourceWidth = video.videoSize.width.toInt(); sourceHeight = video.videoSize.height.toInt()
                                     eagerImages = (field(video, "imageMap") as Map<*, *>).size
@@ -186,6 +191,7 @@ class SvgaDeviceBenchmarkTest {
                         .put("baselinePssBytes", baselinePss).put("baselineJavaBytes", baselineJava)
                         .put("baselineNativeBytes", baselineNative).put("loadPeak", loadPeaks.json())
                         .put("playPeak", playPeaks.json()).put("drawnDistinctFrames", draws)
+                        .put("peakBitmapBytes", peakBitmapBytes)
                         .put("maxDrawGapMillis", maxGap / 1e6)
                         .put("firstDrawToLastDrawMillis", (lastDraw - firstDraw) / 1e6)
                         .put("decodeCount", engine.decodeCount.get() - decodedBefore)

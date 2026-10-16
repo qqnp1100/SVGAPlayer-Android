@@ -169,6 +169,7 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
                     pendingDrawable = candidate
                     pendingDynamic = null // The drawable now owns the dynamic entity.
                     candidate.scaleType = view.scaleType
+                    if (playback != null) candidate.configureFramePrefetch(playback.startFrame, playback.endFrame, playback.reverse)
                     candidate.advanceExternalClock(playback?.frame ?: 0, 0)
                     val width = view.width; val height = view.height
                     withContext(Dispatchers.Default) { candidate.prepare(width, height) }
@@ -219,7 +220,10 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
             if (presentation != null && !presentation.isFrameReady(frame)) {
                 clock.pause(); audio?.pause()
                 prepareFrame(presentation, frame) {
-                    if (playing && this.clock === clock && clock.frame == frame) presentFrame(clock)
+                    if (playing && this.clock === clock && clock.frame == frame && isHostActive()) {
+                        clock.resumeAfterBuffering(System.nanoTime())
+                        presentFrame(clock)
+                    }
                 }
             } else presentFrame(clock)
         } else {
@@ -259,7 +263,7 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
         frameJob?.cancel()
         frameJob = scope.launch {
             try {
-                withContext(Dispatchers.Default) { presentation.prepareFrame(frame) }
+                presentation.awaitFrame(frame)
                 ensureActive()
                 if (!closed && drawable === presentation) onPrepared()
             } catch (e: CancellationException) { throw e }
@@ -285,6 +289,7 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
                 val old = drawable
                 val replacement = SVGADrawable(resource.newVideoEntity(), prepared)
                 replacement.scaleType = view.scaleType
+                clock?.let { replacement.configureFramePrefetch(it.startFrame, it.endFrame, it.reverse) }
                 replacement.advanceExternalClock(clock?.frame ?: 0, clock?.positionNanos ?: 0)
                 val width = view.width; val height = view.height
                 try { withContext(Dispatchers.Default) { replacement.prepare(width, height) } }

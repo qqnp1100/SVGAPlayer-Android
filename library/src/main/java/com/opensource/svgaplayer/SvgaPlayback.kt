@@ -19,25 +19,36 @@ class SvgaPlayback(val frames: Int, val fps: Int, val startFrame: Int = 0,
     var finished = false
         private set
     private var previous = Long.MIN_VALUE
-    fun pause() { previous = Long.MIN_VALUE }
+    private var bufferingResumedAt = Long.MIN_VALUE
+    fun pause() { previous = Long.MIN_VALUE; bufferingResumedAt = Long.MIN_VALUE }
+    /** Resume a decode stall at its completion time, using Choreographer's monotonic time base. */
+    fun resumeAfterBuffering(nowNanos: Long) {
+        if (previous == Long.MIN_VALUE && !finished) {
+            previous = nowNanos
+            bufferingResumedAt = nowNanos
+        }
+    }
     fun seek(progress: Float) {
         positionNanos = (duration * progress.coerceIn(0f, 1f)).toLong().coerceAtMost(duration - 1)
-        completedIterations = 0; finished = false; previous = Long.MIN_VALUE; update()
+        completedIterations = 0; finished = false; pause(); update()
     }
     fun seekFrame(target: Int) {
         val clamped = target.coerceIn(startFrame, endFrame)
         val offset = if (reverse) endFrame - clamped else clamped - startFrame
         // Round up to the first nanosecond in the requested frame, never through Float.
         positionNanos = (offset * 1_000_000_000L + fps - 1) / fps
-        completedIterations = 0; finished = false; previous = Long.MIN_VALUE
+        completedIterations = 0; finished = false; pause()
         update()
     }
     val duration get() = (endFrame - startFrame + 1) * 1_000_000_000L / fps
     fun tick(now: Long, iterations: Int = 0, speed: Float = 1f): Boolean {
         require(iterations >= 0 && speed > 0 && speed.isFinite())
         if (finished) return false
-        if (previous != Long.MIN_VALUE) positionNanos += ((now - previous).coerceAtLeast(0) * speed.toDouble()).toLong()
-        previous = now
+        // A callback already queued for this vsync may predate the decode completion.
+        val tickTime = maxOf(now, bufferingResumedAt)
+        if (previous != Long.MIN_VALUE) positionNanos += ((tickTime - previous).coerceAtLeast(0) * speed.toDouble()).toLong()
+        previous = tickTime
+        bufferingResumedAt = Long.MIN_VALUE
         if (iterations > 0 && positionNanos >= duration * iterations) {
             positionNanos = duration * iterations; completedIterations = iterations
             frame = if (reverse) startFrame else endFrame; finished = true

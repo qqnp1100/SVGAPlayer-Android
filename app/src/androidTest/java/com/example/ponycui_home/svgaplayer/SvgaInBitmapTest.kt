@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.view.Choreographer
 import android.view.View
 import android.widget.ImageView
+import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -19,6 +20,10 @@ import com.opensource.svgaplayer.loader.*
 import com.opensource.svgaplayer.proto.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import okio.ByteString.Companion.toByteString
 import org.json.JSONArray
@@ -30,6 +35,7 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.DeflaterOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -99,6 +105,252 @@ class SvgaInBitmapTest {
     }
     private fun drawable(resource: SvgaResource) = SVGADrawable(resource.newVideoEntity()).apply {
         scaleType = ImageView.ScaleType.FIT_XY; showStaticFrame()
+    }
+
+    @Test fun prefetchRetainsItsWindowAndStaysWithinTheWorkingSetBudget() {
+        val bytes = fixture(true)
+        val imageBytes = 64L * 64 * 4
+        for (reverse in listOf(false, true)) {
+            val reference = drawable(decode(bytes, false))
+            val buffered = drawable(decode(bytes, true, imageBytes * 6))
+            val expected = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+            val actual = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+            try {
+                buffered.configureFramePrefetch(0, 7, reverse)
+                buffered.advanceExternalClock(if (reverse) 7 else 0, 0)
+                buffered.prepare(64, 64)
+                val futureKey = if (reverse) "c" else "b"
+                val future = pixels(buffered.videoItem, futureKey)
+                assertNotNull("The initial window must already contain future pixels", future)
+                buffered.draw(Canvas(actual))
+                assertSame("Drawing the current frame must retain prefetched pixels", future,
+                    pixels(buffered.videoItem, futureKey))
+                assertFalse("Prefetch must not decode the whole animation", buffered.isFrameReady(if (reverse) 0 else 5))
+                for (frame in if (reverse) 7 downTo 0 else 0..7) {
+                    expected.eraseColor(0); actual.eraseColor(0)
+                    reference.advanceExternalClock(frame, 0); buffered.advanceExternalClock(frame, 0)
+                    buffered.prepareFrame(frame)
+                    reference.draw(Canvas(expected)); buffered.draw(Canvas(actual))
+                    assertTrue("reverse=$reverse frame=$frame", expected.sameAs(actual))
+                    assertTrue("Include ready, pending and pooled pixels in the budget",
+                        buffered.videoItem.imageMapSize() <= imageBytes * 6)
+                }
+            } finally { reference.clear(); buffered.clear(); expected.recycle(); actual.recycle() }
+        }
+    }
+
+    @Test fun readyFrameDoesNotWaitForThePrefetchDecoder() {
+        val buffered = drawable(decode(fixture(true), true))
+        val output = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        val held = CountDownLatch(1); val release = CountDownLatch(1); val drawn = CountDownLatch(1)
+        var drawFailure: Throwable? = null
+        buffered.configureFramePrefetch(0, 7)
+        buffered.prepare(64, 64)
+        val decodeLock = field(session(buffered.videoItem)!!, "decodeLock")!!
+        val blocker = Thread { synchronized(decodeLock) { held.countDown(); release.await(5, TimeUnit.SECONDS) } }
+        blocker.start()
+        try {
+            assertTrue(held.await(5, TimeUnit.SECONDS))
+            val drawing = Thread {
+                try { buffered.advanceExternalClock(1, 0); buffered.draw(Canvas(output)) }
+                catch (e: Throwable) { drawFailure = e }
+                finally { drawn.countDown() }
+            }.apply { start() }
+            assertTrue("A ready frame must draw while speculative decoding is blocked", drawn.await(1, TimeUnit.SECONDS))
+            drawing.join(); assertNull(drawFailure)
+        } finally { release.countDown(); blocker.join(); buffered.clear(); output.recycle() }
+    }
+
+    @Test fun cancelledPreparationCannotMoveANewerSeekWindowBack() = runBlocking {
+        val buffered = drawable(decode(fixture(true), true))
+        buffered.configureFramePrefetch(0, 7)
+        buffered.prepare(64, 64)
+        val manager = session(buffered.videoItem)!!
+        val held = CountDownLatch(1); val release = CountDownLatch(1)
+        val decodeLock = field(manager, "decodeLock")!!
+        val blocker = Thread { synchronized(decodeLock) { held.countDown(); release.await(5, TimeUnit.SECONDS) } }
+        blocker.start()
+        var obsolete: Job? = null
+        try {
+            assertTrue(held.await(5, TimeUnit.SECONDS))
+            obsolete = launch(start = CoroutineStart.UNDISPATCHED) { buffered.awaitFrame(5) }
+            val latest = launch(start = CoroutineStart.UNDISPATCHED) { buffered.awaitFrame(7) }
+            obsolete.cancel(); release.countDown()
+            withTimeout(5_000) { obsolete.join(); latest.join() }
+            assertEquals(7, (field(manager, "window") as List<*>).first())
+            assertNull("Cancelled workers must not publish their old frame", pixels(buffered.videoItem, "c"))
+        } finally { release.countDown(); obsolete?.cancel(); blocker.join(); buffered.clear() }
+    }
+
+    @Test fun redrawingTheVisibleFrameDoesNotSupersedeAPendingSeek() = runBlocking {
+        val buffered = drawable(decode(fixture(true), true))
+        val output = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        buffered.configureFramePrefetch(0, 7); buffered.prepare(64, 64); buffered.draw(Canvas(output))
+        val manager = session(buffered.videoItem)!!
+        val decodeLock = field(manager, "decodeLock")!!
+        val held = CountDownLatch(1); val release = CountDownLatch(1)
+        val blocker = Thread { synchronized(decodeLock) { held.countDown(); release.await(5, TimeUnit.SECONDS) } }
+        blocker.start()
+        var decoding: Job? = null
+        try {
+            assertTrue(held.await(5, TimeUnit.SECONDS))
+            decoding = launch(start = CoroutineStart.UNDISPATCHED) { buffered.awaitFrame(5) }
+            // The old frame can be redrawn while the seek worker waits for the decoder.
+            buffered.draw(Canvas(output))
+            assertEquals(5, (field(manager, "window") as List<*>).first())
+            release.countDown(); withTimeout(5_000) { decoding.join() }
+            assertTrue(buffered.isFrameReady(5)); assertNotNull(pixels(buffered.videoItem, "c"))
+        } finally { release.countDown(); decoding?.cancel(); blocker.join(); buffered.clear(); output.recycle() }
+    }
+
+    @Test fun cancellationWhileWaitingForTheDecoderSkipsTheNativeDecode() = runBlocking {
+        val buffered = drawable(decode(fixture(true), true))
+        buffered.configureFramePrefetch(0, 7); buffered.prepare(64, 64)
+        val decodeLock = field(session(buffered.videoItem)!!, "decodeLock")!!
+        val held = CountDownLatch(1); val release = CountDownLatch(1)
+        val worker = AtomicReference<Thread>()
+        val blocker = Thread { synchronized(decodeLock) { held.countDown(); release.await(5, TimeUnit.SECONDS) } }
+        blocker.start()
+        var decoding: Job? = null
+        try {
+            assertTrue(held.await(5, TimeUnit.SECONDS))
+            decoding = launch(Dispatchers.Default) {
+                worker.set(Thread.currentThread())
+                buffered.awaitFrame(5)
+            }
+            // Cancel after the worker passed its dispatch-time check and is waiting on the real monitor.
+            withTimeout(2_000) { while (worker.get()?.state != Thread.State.BLOCKED) delay(1) }
+            decoding.cancel(); release.countDown()
+            withTimeout(5_000) { decoding.join() }
+            assertNull("A cancelled worker must recheck cancellation after acquiring decodeLock",
+                pixels(buffered.videoItem, "c"))
+        } finally { release.countDown(); decoding?.cancel(); blocker.join(); buffered.clear() }
+    }
+
+    @Test fun closingRecyclesUnshownPrefetchWithoutRecyclingSharedImages() {
+        val resource = decode(fixture(true), true)
+        val buffered = drawable(resource); val other = drawable(resource)
+        try {
+            buffered.configureFramePrefetch(0, 7); buffered.prepare(64, 64)
+            val prefetched = listOf("first", "a", "b").map { pixels(buffered.videoItem, it)!! }
+            val shared = eagerImages(buffered.videoItem).values.toList()
+            buffered.clear(); buffered.clear()
+            assertTrue("Unshown prefetched allocations should be recycled immediately", prefetched.all { it.isRecycled })
+            assertTrue("Closing one presentation must preserve resource-owned pixels", shared.none { it.isRecycled })
+            val output = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+            try { other.prepareFrame(0); other.draw(Canvas(output)) }
+            finally { output.recycle() }
+            assertFalse(pixels(other.videoItem, "first")!!.isRecycled)
+        } finally { buffered.clear(); other.clear() }
+    }
+
+    @Test fun closingKeepsPixelsPinnedByAnInProgressDraw() {
+        val buffered = drawable(decode(fixture(true), true))
+        try {
+            buffered.configureFramePrefetch(0, 7); buffered.prepare(64, 64)
+            val manager = session(buffered.videoItem)!!
+            val drawing = pixels(buffered.videoItem, "first")!!
+            val unshown = pixels(buffered.videoItem, "a")!!
+            manager.javaClass.getDeclaredMethod("beginDraw", Int::class.javaPrimitiveType).invoke(manager, 0)
+            buffered.clear()
+            assertFalse("A concurrent draw may still hold these pixels", drawing.isRecycled)
+            assertTrue(unshown.isRecycled)
+            manager.javaClass.getDeclaredMethod("endDraw", Int::class.javaPrimitiveType).invoke(manager, 0)
+        } finally { buffered.clear() }
+    }
+
+    @Test fun seekBeforeWarmupStillStartsPrefetchForTheLatestWindow() = runBlocking {
+        val buffered = drawable(decode(fixture(true), true))
+        try {
+            buffered.configureFramePrefetch(0, 7)
+            buffered.awaitFrame(3)
+            buffered.prepare(64, 64) // A delayed initial warmup still targets frame zero.
+            withTimeout(2_000) { while (!buffered.isFrameReady(5)) delay(1) }
+            assertEquals(3, (field(session(buffered.videoItem)!!, "window") as List<*>).first())
+            assertNull("Obsolete warmup must not restore the initial window", pixels(buffered.videoItem, "first"))
+        } finally { buffered.clear() }
+    }
+
+    @Test fun concurrentPresentationsHaveIndependentWorkersAndCanCloseDuringPreparation() = runBlocking {
+        val resource = decode(fixture(true), true)
+        val first = drawable(resource); val second = drawable(resource)
+        for (presentation in listOf(first, second)) {
+            presentation.configureFramePrefetch(0, 7); presentation.prepare(64, 64)
+        }
+        assertNotSame(pixels(first.videoItem, "first"), pixels(second.videoItem, "first"))
+        val manager = session(first.videoItem)!!
+        val prefetchJob = (field(manager, "prefetchScope") as kotlinx.coroutines.CoroutineScope).coroutineContext[Job]!!
+        val decodeLock = field(manager, "decodeLock")!!
+        val held = CountDownLatch(1); val release = CountDownLatch(1)
+        val blocker = Thread { synchronized(decodeLock) { held.countDown(); release.await(5, TimeUnit.SECONDS) } }
+        blocker.start()
+        var decoding: Job? = null
+        try {
+            assertTrue(held.await(5, TimeUnit.SECONDS))
+            decoding = launch(start = CoroutineStart.UNDISPATCHED) { first.awaitFrame(5) }
+            withTimeout(2_000) { second.awaitFrame(5) }
+            assertNotNull(pixels(second.videoItem, "c"))
+            first.clear() // Must not acquire decodeLock or wait for an old worker.
+            assertTrue("Close must cancel its own prefetch worker", prefetchJob.isCancelled)
+            release.countDown(); withTimeout(5_000) { decoding.join() }
+            withTimeout(5_000) { prefetchJob.join() }
+            assertNull(session(first.videoItem))
+            assertEquals(0L, field(manager, "allocatedBytes"))
+            assertTrue((field(manager, "bitmaps") as Map<*, *>).isEmpty())
+            assertFalse(pixels(second.videoItem, "c")!!.isRecycled)
+        } finally { release.countDown(); decoding?.cancel(); blocker.join(); first.clear(); second.clear() }
+    }
+
+    @Test fun parallelViewLoadsKeepDecodeModesAndPlaybackIndependent() {
+        val file = File.createTempFile("in-bitmap-parallel", ".svga", context.cacheDir).apply { writeBytes(fixture(true)) }
+        val engine = SvgaEngine(context)
+        val loader = SvgaImageLoader(context, engine)
+        val ready = CountDownLatch(6); val finished = CountDownLatch(5)
+        val failure = AtomicReference<Throwable>()
+        val clearedCompletions = AtomicInteger()
+        val views = ArrayList<SVGAImageView>()
+        try {
+            ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val root = FrameLayout(activity); activity.setContentView(root)
+                    repeat(6) { index ->
+                        val view = SVGAImageView(activity); views.add(view)
+                        root.addView(view, FrameLayout.LayoutParams(64, 64).apply { topMargin = index * 72 })
+                        view.loadSvga(SvgaSource.LocalFile(file)) {
+                            this.loader = loader; iterations = 1; inBitmap = index < 4
+                            reverse = index % 2 == 1; startFrame = if (reverse) 2 else 0
+                            onReady = { ready.countDown() }
+                            onFinished = { if (index == 0) clearedCompletions.incrementAndGet() else finished.countDown() }
+                            onError = { failure.set(it); ready.countDown(); finished.countDown() }
+                        }
+                    }
+                }
+                assertTrue(ready.await(10, TimeUnit.SECONDS)); assertNull(failure.get())
+                scenario.onActivity {
+                    assertEquals("Share immutable resources independently for the two decode modes", 2L, engine.decodeCount.get())
+                    views.forEachIndexed { index, view ->
+                        val manager = session((view.drawable as SVGADrawable).videoItem)
+                        assertEquals(index < 4, manager != null)
+                        if (manager != null && index % 2 == 1) {
+                            assertEquals("Initial View positioning must preserve reverse prefetch", -1, field(manager, "direction"))
+                            assertEquals(2, field(manager, "windowStart"))
+                        }
+                    }
+                    assertNotSame(pixels((views[0].drawable as SVGADrawable).videoItem, "first"),
+                        pixels((views[2].drawable as SVGADrawable).videoItem, "first"))
+                    views[0].clearSvga()
+                }
+                assertTrue("Clearing one subscriber must not stop the others", finished.await(10, TimeUnit.SECONDS))
+                assertNull(failure.get()); assertEquals(0, clearedCompletions.get())
+                scenario.onActivity {
+                    assertNull(views[0].drawable)
+                    for (index in 1..5) {
+                        assertEquals(if (index % 2 == 1) 2 else 7, (views[index].drawable as SVGADrawable).currentFrame)
+                    }
+                    views.forEach { it.clearSvga() }
+                }
+            }
+        } finally { loader.close(); engine.close(); file.delete() }
     }
 
     @Test fun defersOnlyOneVisibleReferenceAndSurvivesStagingRemoval() {
@@ -275,10 +527,15 @@ class SvgaInBitmapTest {
     }
 
     @Test fun singlePlaybackFinishesAndClearingDuringDecodeCannotReattach() {
-        val file = File.createTempFile("in-bitmap-play", ".svga", context.cacheDir).apply { writeBytes(fixture(true)) }
+        val file = File.createTempFile("in-bitmap-play", ".svga", context.cacheDir).apply {
+            // Leave time for initial pixels to retire before later images enter the lookahead.
+            writeBytes(fixture(true, visibleFrames = mapOf("first" to 0, "a" to 1, "b" to 5, "c" to 7)))
+        }
         val finished = CountDownLatch(1)
         var failure: Throwable? = null
         var firstPixels: Bitmap? = null
+        var secondPixels: Bitmap? = null
+        var lastHardwarePixels: Bitmap? = null
         var hardwareDrawn = false
         var reused = false
         try {
@@ -292,7 +549,12 @@ class SvgaInBitmapTest {
                             hardwareDrawn = hardwareDrawn || canvas.isHardwareAccelerated
                             val presentation = drawable as? SVGADrawable ?: return
                             if (presentation.currentFrame == 0) firstPixels = pixels(presentation.videoItem, "first")
-                            if (presentation.currentFrame == 3) reused = pixels(presentation.videoItem, "b") === firstPixels
+                            if (presentation.currentFrame == 1) secondPixels = pixels(presentation.videoItem, "a")
+                            if (presentation.currentFrame == 7) {
+                                val pixels = pixels(presentation.videoItem, "c")
+                                if (canvas.isHardwareAccelerated) lastHardwarePixels = pixels
+                                reused = pixels === firstPixels || pixels === secondPixels
+                            }
                         }
                     }
                     activity.setContentView(view)
@@ -309,6 +571,9 @@ class SvgaInBitmapTest {
                 scenario.onActivity {
                     assertEquals(7, (view.drawable as SVGADrawable).currentFrame)
                     handle.seekToProgress(3f / 8); view.clearSvga()
+                    assertNotNull(lastHardwarePixels)
+                    assertFalse("Close must preserve pixels referenced by the current hardware display list",
+                        lastHardwarePixels!!.isRecycled)
                 }
                 InstrumentationRegistry.getInstrumentation().waitForIdleSync()
                 scenario.onActivity { assertNull(view.drawable); handle.resume(); assertNull(view.drawable) }

@@ -4,6 +4,32 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SvgaPlaybackTest {
+    @Test fun bufferingResumesAtDecodeCompletionWithoutLosingTheNextVsync() {
+        val clock = SvgaPlayback(90, 30)
+        clock.tick(0, 1)
+        clock.tick(33_333_334, 1)
+        clock.pause()
+        clock.resumeAfterBuffering(38_333_334)
+        clock.tick(50_000_000, 1)
+        assertEquals(45_000_000L, clock.positionNanos)
+        // A duplicate completion must not reset an already running clock.
+        clock.resumeAfterBuffering(60_000_000)
+        clock.tick(66_666_667, 1)
+        assertEquals(61_666_667L, clock.positionNanos)
+    }
+
+    @Test fun queuedVsyncCannotCountBufferedTimeAfterResuming() {
+        val clock = SvgaPlayback(90, 30)
+        clock.tick(0, 1); clock.tick(33_333_334, 1)
+        clock.pause(); clock.resumeAfterBuffering(55_000_000)
+        clock.tick(50_000_000, 1)
+        assertEquals(33_333_334L, clock.positionNanos)
+        clock.tick(66_666_667, 1)
+        assertEquals(45_000_001L, clock.positionNanos)
+        clock.pause(); clock.seekFrame(0); clock.tick(0, 1)
+        assertEquals(0L, clock.positionNanos)
+    }
+
     @Test fun seekFrameIsExactAtFractionalFrameDurations() {
         for (fps in listOf(12, 24, 29, 30, 60)) {
             for (reverse in listOf(false, true)) {

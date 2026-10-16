@@ -23,7 +23,7 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/** Optional real-device benchmark. Pass sampleAsset; run each mode in a fresh instrumentation process. */
+/** Optional real-device benchmark. Pass sampleFile or sampleAsset; run modes in fresh processes. */
 class SvgaInBitmapComparisonTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
@@ -40,9 +40,14 @@ class SvgaInBitmapComparisonTest {
     private fun bitmapBytes(entity: SVGAVideoEntity): Long = images(entity).values.sumOf { it.allocationByteCount.toLong() } +
         (session(entity)?.let { field(it, "allocatedBytes") as Long } ?: 0)
     private fun sample(): File? {
-        val name = args.getString("sampleAsset") ?: return null
-        return File(context.cacheDir, "in-bitmap-comparison.svga").apply {
-            instrumentation.context.assets.open(name).use { input -> outputStream().use { input.copyTo(it) } }
+        val path = args.getString("sampleFile")
+        val name = args.getString("sampleAsset")
+        if (path == null && name == null) return null
+        // Always own the temporary copy: the caller's sample survives this test's cleanup.
+        return File.createTempFile("in-bitmap-comparison-", ".svga", context.cacheDir).apply {
+            val input = if (path != null) File(path).inputStream()
+                else instrumentation.context.assets.open(requireNotNull(name))
+            input.use { source -> outputStream().use { source.copyTo(it) } }
         }
     }
     private fun publish(name: String, report: JSONObject) {
@@ -52,7 +57,7 @@ class SvgaInBitmapComparisonTest {
     }
 
     @Test fun playbackMemory() {
-        val sample = sample(); assumeTrue("No sampleAsset provided", sample != null)
+        val sample = sample(); assumeTrue("No sampleFile or sampleAsset provided", sample != null)
         val width = args.getString("sampleWidth", "750").toInt()
         val height = args.getString("sampleHeight", "1334").toInt()
         val mode = args.getString("sampleMode", "stream")
@@ -139,7 +144,7 @@ class SvgaInBitmapComparisonTest {
     }
 
     @Test fun everyFrameVisualComparison() = runBlocking {
-        val sample = sample(); assumeTrue("No sampleAsset provided", sample != null)
+        val sample = sample(); assumeTrue("No sampleFile or sampleAsset provided", sample != null)
         val width = args.getString("sampleWidth", "750").toInt()
         val height = args.getString("sampleHeight", "1334").toInt()
         val engine = SvgaEngine(context, memoryBytes = 0, weakMemoryCacheEnabled = false)

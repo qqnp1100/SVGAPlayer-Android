@@ -1,0 +1,603 @@
+{
+  "date": "2026-10-16",
+  "timezone": "Asia/Shanghai",
+  "baselineCommit": "6449b96cf759a11e9e9fbc79afd82ebca9d99319",
+  "afterVersion": "uncommitted working tree based on baselineCommit",
+  "device": {
+    "model": "CTR-AL20",
+    "api": 31,
+    "android": "12",
+    "abis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ]
+  },
+  "fixture": {
+    "kind": "synthetic diagnostic fixture; one unique image per frame; no audio",
+    "sha256": "53852e9a0f7c798aad247b2f4feb201af2bb6c4bbc2684fbb10a7c33328493ce",
+    "fileBytes": 14154101,
+    "frames": 90,
+    "fps": 30,
+    "nominalPlayMillis": 3000,
+    "imageWidth": 256,
+    "imageHeight": 256,
+    "viewportWidth": 256,
+    "viewportHeight": 256
+  },
+  "method": {
+    "passes": 2,
+    "freshInstrumentationProcessPerVersionAndMode": true,
+    "retainedEngineBetweenPasses": true,
+    "explicitGcBetweenPasses": false,
+    "bitmapSampling": "onReady and every onDraw; includes ready, decoding reservations, pending hardware retirement and pool",
+    "heapSamplingIntervalMillis": 200,
+    "pssSamplingIntervalMillis": 500,
+    "pssSource": "/proc/self/smaps_rollup Pss; excludes GPU memtrack",
+    "beforeBitmapPeakUnavailable": true,
+    "baselineFailureCheck": "Baseline APK built in an isolated temporary directory from git archive HEAD"
+  },
+  "configuration": {
+    "iterations": 1,
+    "speed": 1,
+    "bitmapConfig": "ARGB_8888",
+    "skipInvisibleImages": false,
+    "maxDecodedBytes": 268435456,
+    "strongCacheBytes": 33554432,
+    "weakCache": true,
+    "prefetchLookAheadFrames": 3,
+    "speculativeBufferThresholdBytes": 16777216,
+    "maxPoolBytes": 8388608,
+    "globalPrefetchParallelism": 2
+  },
+  "summary": [
+    {
+      "version": "before",
+      "inBitmap": false,
+      "playMillis": [
+        3025.378906,
+        3025.410728
+      ],
+      "loadMillis": [
+        1517.753749,
+        74.973229
+      ],
+      "drawnDistinctFrames": [
+        90,
+        90
+      ],
+      "peakBitmapBytes": null,
+      "peakPssBytes": 185892864,
+      "peakNativeBytes": 37387520
+    },
+    {
+      "version": "before",
+      "inBitmap": true,
+      "playMillis": [
+        5118.219113,
+        5926.621352
+      ],
+      "loadMillis": [
+        1263.487916,
+        100.11375
+      ],
+      "drawnDistinctFrames": [
+        90,
+        90
+      ],
+      "peakBitmapBytes": null,
+      "peakPssBytes": 140448768,
+      "peakNativeBytes": 14138808
+    },
+    {
+      "version": "after",
+      "inBitmap": false,
+      "playMillis": [
+        3013.260416,
+        3018.225676
+      ],
+      "loadMillis": [
+        1545.208957,
+        34.522812
+      ],
+      "drawnDistinctFrames": [
+        90,
+        90
+      ],
+      "peakBitmapBytes": 23592960,
+      "peakPssBytes": 183205888,
+      "peakNativeBytes": 37021288
+    },
+    {
+      "version": "after",
+      "inBitmap": true,
+      "playMillis": [
+        3023.480884,
+        3015.173072
+      ],
+      "loadMillis": [
+        1290.218802,
+        203.853229
+      ],
+      "drawnDistinctFrames": [
+        90,
+        90
+      ],
+      "peakBitmapBytes": 1835008,
+      "peakPssBytes": 142346240,
+      "peakNativeBytes": 15304448
+    }
+  ],
+  "validation": {
+    "unit": {
+      "tests": 36,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "device": {
+      "tests": 40,
+      "passed": 39,
+      "failures": 1,
+      "inBitmapTests": 18,
+      "inBitmapFailures": 0,
+      "knownFailure": {
+        "test": "SvgaBitmapDecodeTest.filteringRealAssetsPreservesAllFramesIncludingBitmapMattes",
+        "error": "IllegalArgumentException: Invalid image img_122",
+        "cause": "Castle.svga image map includes ID3-tagged MP3 bytes under img_122",
+        "reproducedOnBaselineCommit": true,
+        "failureLocation": "SvgaResource.kt:142; unchanged by this fix"
+      }
+    }
+  },
+  "rawReports": {
+    "before": [
+      {
+        "id": "prefetch-before-90f",
+        "inBitmap": false,
+        "samplerVersion": 3,
+        "pssMethod": "/proc/self/smaps_rollup Pss (excludes GPU memtrack)",
+        "fileBytes": 14154101,
+        "device": "CTR-AL20",
+        "api": 31,
+        "android": "12",
+        "abis": [
+          "arm64-v8a",
+          "armeabi-v7a",
+          "armeabi"
+        ],
+        "pid": 12869,
+        "viewportWidth": 256,
+        "viewportHeight": 256,
+        "bitmapConfig": "ARGB_8888",
+        "skipInvisibleImages": false,
+        "strongCacheBytes": 33554432,
+        "weakCache": true,
+        "rows": [
+          {
+            "pass": 1,
+            "frames": 90,
+            "fps": 30,
+            "eagerImages": 90,
+            "deferredImages": 0,
+            "sourceWidth": 256,
+            "sourceHeight": 256,
+            "nominalPlayMillis": 3000,
+            "loadMillis": 1517.753749,
+            "actualPlayMillis": 3025.378906,
+            "totalMillis": 4543.132655,
+            "loadCpuMillis": 1728,
+            "playCpuMillis": 1232,
+            "loadCpuPercent": 113.85246131913854,
+            "playCpuPercent": 40.72217194205558,
+            "samplerCpuMillis": 106.793549,
+            "baselinePssBytes": 100251648,
+            "baselineJavaBytes": 2111688,
+            "baselineNativeBytes": 12580448,
+            "loadPeak": {
+              "pssBytes": 170173440,
+              "javaBytes": 35861248,
+              "nativeBytes": 37229296,
+              "heapBytes": 73090544,
+              "heapSamples": 9,
+              "pssSamples": 4
+            },
+            "playPeak": {
+              "pssBytes": 185740288,
+              "javaBytes": 36406064,
+              "nativeBytes": 37387520,
+              "heapBytes": 73290816,
+              "heapSamples": 16,
+              "pssSamples": 5
+            },
+            "drawnDistinctFrames": 90,
+            "maxDrawGapMillis": 50.795521,
+            "firstDrawToLastDrawMillis": 2977.582134,
+            "decodeCount": 1,
+            "strongCacheHits": 0,
+            "weakCacheHits": 0
+          },
+          {
+            "pass": 2,
+            "frames": 90,
+            "fps": 30,
+            "eagerImages": 90,
+            "deferredImages": 0,
+            "sourceWidth": 256,
+            "sourceHeight": 256,
+            "nominalPlayMillis": 3000,
+            "loadMillis": 74.973229,
+            "actualPlayMillis": 3025.410728,
+            "totalMillis": 3100.383957,
+            "loadCpuMillis": 101,
+            "playCpuMillis": 2489,
+            "loadCpuPercent": 134.7147526485754,
+            "playCpuPercent": 82.26982131597704,
+            "samplerCpuMillis": 150.296244,
+            "baselinePssBytes": 185647104,
+            "baselineJavaBytes": 36489464,
+            "baselineNativeBytes": 36482304,
+            "loadPeak": {
+              "pssBytes": 185647104,
+              "javaBytes": 36612024,
+              "nativeBytes": 36540592,
+              "heapBytes": 73152616,
+              "heapSamples": 2,
+              "pssSamples": 1
+            },
+            "playPeak": {
+              "pssBytes": 185892864,
+              "javaBytes": 37091256,
+              "nativeBytes": 36736080,
+              "heapBytes": 73753184,
+              "heapSamples": 15,
+              "pssSamples": 5
+            },
+            "drawnDistinctFrames": 90,
+            "maxDrawGapMillis": 49.681718,
+            "firstDrawToLastDrawMillis": 2980.593696,
+            "decodeCount": 0,
+            "strongCacheHits": 1,
+            "weakCacheHits": 0
+          }
+        ]
+      },
+      {
+        "id": "prefetch-before-90f",
+        "inBitmap": true,
+        "samplerVersion": 3,
+        "pssMethod": "/proc/self/smaps_rollup Pss (excludes GPU memtrack)",
+        "fileBytes": 14154101,
+        "device": "CTR-AL20",
+        "api": 31,
+        "android": "12",
+        "abis": [
+          "arm64-v8a",
+          "armeabi-v7a",
+          "armeabi"
+        ],
+        "pid": 13123,
+        "viewportWidth": 256,
+        "viewportHeight": 256,
+        "bitmapConfig": "ARGB_8888",
+        "skipInvisibleImages": false,
+        "strongCacheBytes": 33554432,
+        "weakCache": true,
+        "rows": [
+          {
+            "pass": 1,
+            "frames": 90,
+            "fps": 30,
+            "eagerImages": 0,
+            "deferredImages": 90,
+            "sourceWidth": 256,
+            "sourceHeight": 256,
+            "nominalPlayMillis": 3000,
+            "loadMillis": 1263.487916,
+            "actualPlayMillis": 5118.219113,
+            "totalMillis": 6381.707029,
+            "loadCpuMillis": 1433,
+            "playCpuMillis": 3078,
+            "loadCpuPercent": 113.416201441534,
+            "playCpuPercent": 60.138105306629924,
+            "samplerCpuMillis": 169.893442,
+            "baselinePssBytes": 101296128,
+            "baselineJavaBytes": 2111000,
+            "baselineNativeBytes": 12173768,
+            "loadPeak": {
+              "pssBytes": 117918720,
+              "javaBytes": 40494040,
+              "nativeBytes": 13287088,
+              "heapBytes": 53263400,
+              "heapSamples": 8,
+              "pssSamples": 3
+            },
+            "playPeak": {
+              "pssBytes": 140424192,
+              "javaBytes": 36857568,
+              "nativeBytes": 13821664,
+              "heapBytes": 50345464,
+              "heapSamples": 26,
+              "pssSamples": 9
+            },
+            "drawnDistinctFrames": 90,
+            "maxDrawGapMillis": 85.035157,
+            "firstDrawToLastDrawMillis": 5084.217498,
+            "decodeCount": 1,
+            "strongCacheHits": 0,
+            "weakCacheHits": 0
+          },
+          {
+            "pass": 2,
+            "frames": 90,
+            "fps": 30,
+            "eagerImages": 0,
+            "deferredImages": 90,
+            "sourceWidth": 256,
+            "sourceHeight": 256,
+            "nominalPlayMillis": 3000,
+            "loadMillis": 100.11375,
+            "actualPlayMillis": 5926.621352,
+            "totalMillis": 6026.735102,
+            "loadCpuMillis": 150,
+            "playCpuMillis": 4732,
+            "loadCpuPercent": 149.8295688654156,
+            "playCpuPercent": 79.8431301571702,
+            "samplerCpuMillis": 270.811777,
+            "baselinePssBytes": 140448768,
+            "baselineJavaBytes": 36914360,
+            "baselineNativeBytes": 13424504,
+            "loadPeak": {
+              "pssBytes": 140448768,
+              "javaBytes": 37064864,
+              "nativeBytes": 13436728,
+              "heapBytes": 50501592,
+              "heapSamples": 2,
+              "pssSamples": 1
+            },
+            "playPeak": {
+              "pssBytes": 136311808,
+              "javaBytes": 38121632,
+              "nativeBytes": 14138808,
+              "heapBytes": 52089048,
+              "heapSamples": 29,
+              "pssSamples": 10
+            },
+            "drawnDistinctFrames": 90,
+            "maxDrawGapMillis": 85.708229,
+            "firstDrawToLastDrawMillis": 5880.243019,
+            "decodeCount": 0,
+            "strongCacheHits": 1,
+            "weakCacheHits": 0
+          }
+        ]
+      }
+    ],
+    "after": [
+      {
+        "id": "prefetch-after-90f",
+        "inBitmap": false,
+        "samplerVersion": 3,
+        "pssMethod": "/proc/self/smaps_rollup Pss (excludes GPU memtrack)",
+        "fileBytes": 14154101,
+        "device": "CTR-AL20",
+        "api": 31,
+        "android": "12",
+        "abis": [
+          "arm64-v8a",
+          "armeabi-v7a",
+          "armeabi"
+        ],
+        "pid": 18431,
+        "viewportWidth": 256,
+        "viewportHeight": 256,
+        "bitmapConfig": "ARGB_8888",
+        "skipInvisibleImages": false,
+        "strongCacheBytes": 33554432,
+        "weakCache": true,
+        "rows": [
+          {
+            "pass": 1,
+            "frames": 90,
+            "fps": 30,
+            "eagerImages": 90,
+            "deferredImages": 0,
+            "sourceWidth": 256,
+            "sourceHeight": 256,
+            "nominalPlayMillis": 3000,
+            "loadMillis": 1545.208957,
+            "actualPlayMillis": 3013.260416,
+            "totalMillis": 4558.469373,
+            "loadCpuMillis": 1759,
+            "playCpuMillis": 1233,
+            "loadCpuPercent": 113.8357367158337,
+            "playCpuPercent": 40.91913176348579,
+            "samplerCpuMillis": 103.474112,
+            "baselinePssBytes": 104291328,
+            "baselineJavaBytes": 2112096,
+            "baselineNativeBytes": 12347304,
+            "loadPeak": {
+              "pssBytes": 164260864,
+              "javaBytes": 35861824,
+              "nativeBytes": 37021288,
+              "heapBytes": 72883112,
+              "heapSamples": 9,
+              "pssSamples": 4
+            },
+            "playPeak": {
+              "pssBytes": 182467584,
+              "javaBytes": 36456160,
+              "nativeBytes": 36938424,
+              "heapBytes": 73173920,
+              "heapSamples": 16,
+              "pssSamples": 5
+            },
+            "drawnDistinctFrames": 90,
+            "peakBitmapBytes": 23592960,
+            "maxDrawGapMillis": 40.963125,
+            "firstDrawToLastDrawMillis": 2978.292134,
+            "decodeCount": 1,
+            "strongCacheHits": 0,
+            "weakCacheHits": 0
+          },
+          {
+            "pass": 2,
+            "frames": 90,
+            "fps": 30,
+            "eagerImages": 90,
+            "deferredImages": 0,
+            "sourceWidth": 256,
+            "sourceHeight": 256,
+            "nominalPlayMillis": 3000,
+            "loadMillis": 34.522812,
+            "actualPlayMillis": 3018.225676,
+            "totalMillis": 3052.748488,
+            "loadCpuMillis": 50,
+            "playCpuMillis": 2362,
+            "loadCpuPercent": 144.83177094612105,
+            "playCpuPercent": 78.25789896301976,
+            "samplerCpuMillis": 162.427713,
+            "baselinePssBytes": 182500352,
+            "baselineJavaBytes": 36522808,
+            "baselineNativeBytes": 36607360,
+            "loadPeak": {
+              "pssBytes": 182500352,
+              "javaBytes": 36645368,
+              "nativeBytes": 36680336,
+              "heapBytes": 73325704,
+              "heapSamples": 2,
+              "pssSamples": 1
+            },
+            "playPeak": {
+              "pssBytes": 183205888,
+              "javaBytes": 37173752,
+              "nativeBytes": 36879560,
+              "heapBytes": 73934216,
+              "heapSamples": 15,
+              "pssSamples": 5
+            },
+            "drawnDistinctFrames": 90,
+            "peakBitmapBytes": 23592960,
+            "maxDrawGapMillis": 52.003958,
+            "firstDrawToLastDrawMillis": 2978.609374,
+            "decodeCount": 0,
+            "strongCacheHits": 1,
+            "weakCacheHits": 0
+          }
+        ]
+      },
+      {
+        "id": "prefetch-after-90f",
+        "inBitmap": true,
+        "samplerVersion": 3,
+        "pssMethod": "/proc/self/smaps_rollup Pss (excludes GPU memtrack)",
+        "fileBytes": 14154101,
+        "device": "CTR-AL20",
+        "api": 31,
+        "android": "12",
+        "abis": [
+          "arm64-v8a",
+          "armeabi-v7a",
+          "armeabi"
+        ],
+        "pid": 18617,
+        "viewportWidth": 256,
+        "viewportHeight": 256,
+        "bitmapConfig": "ARGB_8888",
+        "skipInvisibleImages": false,
+        "strongCacheBytes": 33554432,
+        "weakCache": true,
+        "rows": [
+          {
+            "pass": 1,
+            "frames": 90,
+            "fps": 30,
+            "eagerImages": 0,
+            "deferredImages": 90,
+            "sourceWidth": 256,
+            "sourceHeight": 256,
+            "nominalPlayMillis": 3000,
+            "loadMillis": 1290.218802,
+            "actualPlayMillis": 3023.480884,
+            "totalMillis": 4313.699686,
+            "loadCpuMillis": 1462,
+            "playCpuMillis": 1735,
+            "loadCpuPercent": 113.31411367852628,
+            "playCpuPercent": 57.38418950096461,
+            "samplerCpuMillis": 68.116456,
+            "baselinePssBytes": 101321728,
+            "baselineJavaBytes": 2111752,
+            "baselineNativeBytes": 12246392,
+            "loadPeak": {
+              "pssBytes": 117625856,
+              "javaBytes": 40412840,
+              "nativeBytes": 14124560,
+              "heapBytes": 53223064,
+              "heapSamples": 8,
+              "pssSamples": 3
+            },
+            "playPeak": {
+              "pssBytes": 142346240,
+              "javaBytes": 36697664,
+              "nativeBytes": 14701984,
+              "heapBytes": 50842904,
+              "heapSamples": 16,
+              "pssSamples": 5
+            },
+            "drawnDistinctFrames": 90,
+            "peakBitmapBytes": 1572864,
+            "maxDrawGapMillis": 52.774323,
+            "firstDrawToLastDrawMillis": 2981.656822,
+            "decodeCount": 1,
+            "strongCacheHits": 0,
+            "weakCacheHits": 0
+          },
+          {
+            "pass": 2,
+            "frames": 90,
+            "fps": 30,
+            "eagerImages": 0,
+            "deferredImages": 90,
+            "sourceWidth": 256,
+            "sourceHeight": 256,
+            "nominalPlayMillis": 3000,
+            "loadMillis": 203.853229,
+            "actualPlayMillis": 3015.173072,
+            "totalMillis": 3219.026301,
+            "loadCpuMillis": 280,
+            "playCpuMillis": 3675,
+            "loadCpuPercent": 137.35372325154586,
+            "playCpuPercent": 121.88355070318829,
+            "samplerCpuMillis": 131.482344,
+            "baselinePssBytes": 141282304,
+            "baselineJavaBytes": 36764312,
+            "baselineNativeBytes": 14048792,
+            "loadPeak": {
+              "pssBytes": 141282304,
+              "javaBytes": 36963408,
+              "nativeBytes": 14411752,
+              "heapBytes": 51375160,
+              "heapSamples": 3,
+              "pssSamples": 2
+            },
+            "playPeak": {
+              "pssBytes": 140475392,
+              "javaBytes": 37684304,
+              "nativeBytes": 15304448,
+              "heapBytes": 52785424,
+              "heapSamples": 15,
+              "pssSamples": 4
+            },
+            "drawnDistinctFrames": 90,
+            "peakBitmapBytes": 1835008,
+            "maxDrawGapMillis": 64.534115,
+            "firstDrawToLastDrawMillis": 2975.802759,
+            "decodeCount": 0,
+            "strongCacheHits": 1,
+            "weakCacheHits": 0
+          }
+        ]
+      }
+    ]
+  }
+}

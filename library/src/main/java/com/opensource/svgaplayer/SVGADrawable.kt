@@ -48,6 +48,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
         val changed = currentFrame != frame
         updateCurrentFrame(frame, false)
         presentationTimeNanos = timeNanos
+        videoItem.deferredImages?.let { it.request(frame); it.requestPrefetch() }
         if (changed || drawer.hasActiveScrollingText) invalidateSelf()
     }
 
@@ -61,17 +62,32 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     /** Prepare text/path caches on a worker before the first visible frame. */
     fun prepare(width: Int, height: Int) {
-        prepareFrame(currentFrame)
+        if (!released) videoItem.deferredImages?.preparePlayback(currentFrame)
         synchronized(drawer) {
             if (released) return
             val picture = android.graphics.Picture()
             val canvas = picture.beginRecording(width, height)
-            try { drawer.renderFrame(canvas, currentFrame, scaleType, width, height, 0L) }
-            finally { picture.endRecording() }
+            val frame = currentFrame
+            val images = videoItem.deferredImages
+            images?.beginDraw(frame)
+            try { drawer.renderFrame(canvas, frame, scaleType, width, height, 0L) }
+            finally { picture.endRecording(); images?.endDraw(frame) }
         }
     }
     /** Prepare only this frame's deferred pixels on the caller's worker thread. */
     fun prepareFrame(frame: Int) { if (!released) videoItem.deferredImages?.prepare(frame) }
+    /** Configure only deferred presentations; eagerly decoded resources take no extra path. */
+    fun configureFramePrefetch(startFrame: Int, endFrame: Int, reverse: Boolean = false) {
+        if (!released) videoItem.deferredImages?.configurePrefetch(startFrame, endFrame, reverse)
+    }
+    /** Capture the request before dispatch so obsolete workers cannot undo a seek or replay. */
+    suspend fun awaitFrame(frame: Int) {
+        if (released) return
+        val images = videoItem.deferredImages ?: return
+        val ticket = images.request(frame)
+        withContext(Dispatchers.Default) { images.prepare(frame, ticket, coroutineContext) }
+        images.requestPrefetch()
+    }
     fun isFrameReady(frame: Int): Boolean = !released && videoItem.deferredImages?.isReady(frame) != false
     internal fun prepareAllImages() { if (!released) videoItem.deferredImages?.prepareAll() }
     internal fun areAllImagesReady(): Boolean = videoItem.deferredImages?.allReady() != false
@@ -116,7 +132,7 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
             // Covers a View drawing during initial preparation or direct Drawable frame updates.
             if (pendingFrame?.isActive != true) pendingFrame = frameScope.launch {
                 try {
-                    withContext(Dispatchers.Default) { prepareFrame(frame) }
+                    awaitFrame(frame)
                     ensureActive()
                     invalidateSelf()
                 } catch (e: CancellationException) { throw e }
@@ -128,13 +144,19 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
             if (drawnFrame < 0 || !isFrameReady(drawnFrame)) return
         } else prepareFrame(frame)
         val displayFrame = if (isFrameReady(frame)) frame else drawnFrame
-        if (externalClock) drawer.renderFrame(canvas, displayFrame, scaleType, canvas.width, canvas.height, presentationTimeNanos)
-        else {
-            drawer.drawFrame(canvas, displayFrame, scaleType)
-            textScrollTicker.onDraw(drawer.hasActiveScrollingText)
+        val images = videoItem.deferredImages
+        images?.beginDraw(displayFrame)
+        try {
+            if (externalClock) drawer.renderFrame(canvas, displayFrame, scaleType, canvas.width, canvas.height, presentationTimeNanos)
+            else {
+                drawer.drawFrame(canvas, displayFrame, scaleType)
+                textScrollTicker.onDraw(drawer.hasActiveScrollingText)
+            }
+            drawnFrame = displayFrame
+            images?.afterDraw(displayFrame, canvas, callback as? android.view.View)
+        } finally {
+            images?.endDraw(displayFrame)
         }
-        drawnFrame = displayFrame
-        videoItem.deferredImages?.afterDraw(displayFrame, canvas, callback as? android.view.View)
     }
 
     internal fun setTextScrollEnabled(enabled: Boolean) {

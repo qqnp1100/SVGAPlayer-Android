@@ -30,10 +30,12 @@ internal class SvgaLegacyViewSession(
         pause()
         pendingCompletion = false
         this.reverse = reverse
+        frameJob?.cancel(); frameJob = null
         val start = (range?.location ?: 0).coerceIn(0, resource.frames - 1)
         val end = (start.toLong() + (range?.length ?: resource.frames).toLong() - 1)
             .coerceIn(start.toLong(), (resource.frames - 1).toLong()).toInt()
         clock = SvgaPlayback(resource.frames, resource.fps, start, end, reverse)
+        drawable.configureFramePrefetch(start, end, reverse)
         drawable.advanceExternalClock(clock.frame, clock.positionNanos)
         resume()
     }
@@ -49,7 +51,7 @@ internal class SvgaLegacyViewSession(
         if (drawable.isFrameReady(playback.frame)) drawable.advanceExternalClock(playback.frame, playback.positionNanos)
         else frameJob = scope.launch {
             try {
-                withContext(Dispatchers.Default) { drawable.prepareFrame(playback.frame) }
+                drawable.awaitFrame(playback.frame)
                 ensureActive()
                 if (!closed && clock === playback) drawable.advanceExternalClock(playback.frame, playback.positionNanos)
             } catch (e: CancellationException) { throw e }
@@ -59,6 +61,7 @@ internal class SvgaLegacyViewSession(
     }
     fun resume() {
         if (closed) return
+        drawable.configureFramePrefetch(clock.startFrame, clock.endFrame, clock.reverse)
         playing = true; view.isAnimating = true
         if (prepared) {
             drawable.cleared = false
@@ -130,9 +133,12 @@ internal class SvgaLegacyViewSession(
             playback.pause(); audio?.pause()
             frameJob = scope.launch {
                 try {
-                    withContext(Dispatchers.Default) { drawable.prepareFrame(playback.frame) }
+                    drawable.awaitFrame(playback.frame)
                     ensureActive()
-                    if (!closed && playing && clock === playback) presentFrame(playback, before)
+                    if (!closed && playing && clock === playback) {
+                        if (isHostActive()) playback.resumeAfterBuffering(System.nanoTime())
+                        presentFrame(playback, before)
+                    }
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { pause(); android.util.Log.e("SVGAImageView", "Frame decode failed", e) }
             }
