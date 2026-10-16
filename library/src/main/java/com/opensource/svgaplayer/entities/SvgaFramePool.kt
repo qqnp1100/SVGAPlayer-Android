@@ -59,10 +59,16 @@ internal class SvgaFramePool {
         return transforms.getOrPut(value) { value }
     }
 
-    /** Conservative cache accounting; counts shared storage once and keeps every index reference. */
-    fun estimatedBytes(indexCount: Long): Long = indexCount * 8 +
-        (frames.size.toLong() + keepFrames.size + jsonFrames.size + if (usedEmpty) 1 else 0) * 256 +
-        layouts.size * 48L + transforms.size * 40L
+    /** Cache estimate including shared payloads and native paths, even before paths are built. */
+    fun estimatedBytes(indexCount: Long): Long {
+        val estimator = SvgaFrameSizeEstimator()
+        val payloadBytes = frames.values.sumOf { estimator.payloadBytes(it) } +
+            keepFrames.values.sumOf { estimator.payloadBytes(it) } +
+            jsonFrames.values.sumOf { estimator.payloadBytes(it) }
+        return indexCount * 8 +
+            (frames.size.toLong() + keepFrames.size + jsonFrames.size + if (usedEmpty) 1 else 0) * 256 +
+            layouts.size * 48L + transforms.size * 40L + payloadBytes
+    }
 
     companion object {
         private fun jsonHash(value: Any?): Int = when (value) {

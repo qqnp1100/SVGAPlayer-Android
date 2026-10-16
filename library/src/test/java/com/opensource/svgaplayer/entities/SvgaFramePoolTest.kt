@@ -98,6 +98,65 @@ class SvgaFramePoolTest {
         assertTrue(second.frames[0].shapes.isEmpty())
     }
 
+    @Test fun repeatedFramesAccountForMaskTextWithoutMultiplyingTheSharedPayload() {
+        val shortPath = "M 0 0 L 1 1 Z "
+        val longPath = shortPath.repeat(8192)
+        fun estimate(path: String, count: Int): Long {
+            val pool = SvgaFramePool()
+            val source = FrameEntity.Builder().alpha(1f).clipPath(path).build()
+            repeat(count) { pool.frame(source, null) }
+            return pool.estimatedBytes(count.toLong())
+        }
+        assertTrue(estimate(longPath, 1000) >= longPath.length * 2L)
+        assertEquals(estimate(longPath, 1) - estimate(shortPath, 1),
+            estimate(longPath, 1000) - estimate(shortPath, 1000))
+    }
+
+    @Test fun keepFramesAccountForTheirSharedVectorPayloadOnlyOnce() {
+        fun estimate(path: String, keepCount: Int): Long {
+            val pool = SvgaFramePool()
+            var previous = pool.frame(FrameEntity.Builder().alpha(1f).shapes(listOf(
+                ShapeEntity.Builder().type(ShapeEntity.ShapeType.SHAPE)
+                    .shape(ShapeEntity.ShapeArgs.Builder().d(path).build()).build())).build(), null)
+            repeat(keepCount) { index ->
+                previous = pool.frame(FrameEntity.Builder().alpha((index + 1) / 1000f).shapes(listOf(
+                    ShapeEntity.Builder().type(ShapeEntity.ShapeType.KEEP).build())).build(), previous)
+            }
+            return pool.estimatedBytes(keepCount + 1L)
+        }
+        val shortPath = "M 0 0 L 1 1 Z "
+        val longPath = shortPath.repeat(8192)
+        assertTrue(estimate(longPath, 0) >= longPath.length * 2L)
+        assertEquals(estimate(longPath, 0) - estimate(shortPath, 0),
+            estimate(longPath, 100) - estimate(shortPath, 100))
+    }
+
+    @Test fun equalButSeparatelyRetainedMaskStringsAreCountedIndividually() {
+        val path = "M 0 0 L 1 1 Z ".repeat(8192)
+        fun estimate(secondPath: String): Long {
+            val pool = SvgaFramePool()
+            pool.frame(FrameEntity.Builder().alpha(1f).clipPath(path).build(), null)
+            pool.frame(FrameEntity.Builder().alpha(.5f).clipPath(secondPath).build(), null)
+            return pool.estimatedBytes(2)
+        }
+        val copy = String(path.toCharArray())
+        assertNotSame(path, copy)
+        assertTrue(estimate(copy) - estimate(path) >= path.length * 2L)
+    }
+
+    @Test fun nativePathAllowanceGrowsWithGeometryEvenWhenTextLengthIsUnchanged() {
+        val command = "M 0 0 L 1 1 Z "
+        val dense = command.repeat(1024)
+        val sparse = command.padEnd(dense.length, ' ')
+        fun estimate(path: String): Long {
+            val pool = SvgaFramePool()
+            pool.frame(FrameEntity.Builder().alpha(1f).clipPath(path).build(), null)
+            return pool.estimatedBytes(1)
+        }
+        assertTrue("Native geometry needs space in addition to the retained string",
+            estimate(dense) > estimate(sparse))
+    }
+
     @Test fun existingBitmapOnlyProtobufSamplesPreserveEveryIndexedValueAndReduceObjects() {
         val assets = listOf(File("../app/src/main/assets"), File("app/src/main/assets")).first { it.isDirectory }
         val reports = ArrayList<String>()
