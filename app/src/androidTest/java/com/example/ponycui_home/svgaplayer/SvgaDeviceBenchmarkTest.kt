@@ -149,7 +149,7 @@ class SvgaDeviceBenchmarkTest {
                             view.loadSvga(SvgaRequest(SvgaSource.LocalFile(sample), width, height)) {
                                 this.loader = loader
                                 reuseOnRebind = false
-                                iterations = 1; inBitmap = enabled; skipInvisibleImages = false
+                                iterations = 1; inBitmap = enabled; skipInvisibleImages = false; progressive = false
                                 bitmapConfig = android.graphics.Bitmap.Config.ARGB_8888
                                 onReady = {
                                     ready = now(); cpuReady = Process.getElapsedCpuTime(); phase.set(2)

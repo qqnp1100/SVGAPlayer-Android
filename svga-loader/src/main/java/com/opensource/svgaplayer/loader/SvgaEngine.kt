@@ -49,7 +49,7 @@ class SvgaEngine(
     private val sourceRejections = HashMap<String, SourceRejections>()
     private val sources = SharedFlights<String, Source>(scope) { if (it.temporary) it.file.delete() }
     private val resources = SharedFlights<String, SvgaResource>(scope)
-    private val memory = ResourceMemoryCache<SvgaResource>(memoryBytes) { it.sizeBytes }
+    private val memory = ResourceMemoryCache<SvgaResource>(memoryBytes, { !it.hasImageDecodeError }) { it.sizeBytes }
     val weakMemoryHits = AtomicLong()
     val networkRequests = AtomicLong()
     val decodeCount = AtomicLong()
@@ -106,7 +106,7 @@ class SvgaEngine(
 
     private fun decodeKey(r: SvgaRequest): String {
         val options = r.resolveDecodeOptions()
-        return "${r.width}:${r.height}:${options.bitmapConfig.name}:${options.skipInvisibleImages}:${options.inBitmap}"
+        return "${r.width}:${r.height}:${options.bitmapConfig.name}:${options.skipInvisibleImages}:${options.inBitmap}:${options.progressive}"
     }
 
     private suspend fun <T> useSource(r: SvgaRequest, onProgress: (suspend (SvgaDownloadProgress) -> Unit)?,
@@ -132,11 +132,13 @@ class SvgaEngine(
 
     private suspend fun prepare(r: SvgaRequest, source: Source): SvgaResource {
         val decodeOptions = r.resolveDecodeOptions()
-        val decodeKey = "${r.width}:${r.height}:${decodeOptions.bitmapConfig.name}:${decodeOptions.skipInvisibleImages}:${decodeOptions.inBitmap}"
-        val lookupKey = "${sourceIdentity(r)}:$decodeKey"
+        val decodeKey = decodeKey(r)
+        val identity = sourceIdentity(r)
+        val digest = source.digest
+        val lookupKey = "$identity:$decodeKey"
         val weakEnabled = weakMemoryCacheEnabled && r.usesWeakMemory
         return withContext(Dispatchers.IO) {
-            val key = "${sourceIdentity(r)}:${source.digest}:$decodeKey"
+            val key = "$identity:$digest:$decodeKey"
             val hit = if (source.reusable && !r.refresh) memory.findKey(key, r.readsMemory, weakEnabled) else null
             if (hit != null) {
                 if (hit.weak) weakMemoryHits.incrementAndGet() else memoryHits.incrementAndGet()
@@ -149,7 +151,19 @@ class SvgaEngine(
                         val dir = File(staging, java.util.UUID.randomUUID().toString()).apply { mkdirs() }
                         try {
                             decodeCount.incrementAndGet()
-                            val resource = source.file.inputStream().use { SvgaResource.decode(it, dir, r.width, r.height, maxDecodedBytes, decodeOptions) }
+                            val resource = source.file.inputStream().use {
+                                SvgaResource.decode(it, dir, r.width, r.height, maxDecodedBytes, decodeOptions) {
+                                    // Retain only body identity, not requests and their UI callbacks.
+                                    memory.invalidate("$identity:$digest:")
+                                    scope.launch {
+                                        diskMutex.withLock {
+                                            val entry = File(disk, identity)
+                                            val metadata = runCatching { JSONObject(File(entry, "metadata").readText()) }.getOrNull()
+                                            if (metadata?.optString("digest") == digest) entry.deleteRecursively()
+                                        }
+                                    }
+                                }
+                            }
                             source.publish(true)
                             resource
                         } catch (e: Exception) {

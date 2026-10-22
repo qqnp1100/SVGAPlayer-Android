@@ -21,16 +21,23 @@ internal data class SvgaDeferredImage(
     val options: SvgaDecodeOptions,
 )
 
-/** A presentation owns mutable pixels. The shared resource never owns or caches these bitmaps. */
+/** Per-presentation frame scheduling and mutable pixels, with optional resource-owned shared pixels. */
 internal class SvgaDeferredImages(
     sources: Map<String, SvgaDeferredImage>,
     private val maxBytes: Long,
+    private var shared: SvgaSharedImages? = null,
 ) {
     private data class Pixels(val bitmap: Bitmap, val reusable: Boolean, var usedByHardware: Boolean = false)
     private val lock = Any()
     private val decodeLock = Any()
     private var sources = sources
-    private var byFrame = sources.entries.groupBy({ it.value.frame }, { it.key })
+    private var byFrame = if (sources.isEmpty()) shared?.frameKeys.orEmpty() else {
+        val frames = shared?.frameKeys.orEmpty().toMutableMap()
+        sources.entries.groupBy({ it.value.frame }, { it.key }).forEach { (frame, keys) ->
+            frames[frame] = frames[frame].orEmpty() + keys
+        }
+        frames.toMap()
+    }
     // A lone resolution stays lazy, but has no reason to participate in bitmap reuse.
     private var reusableKeys = sources.entries.groupBy { it.value.width to it.value.height }
         .values.filter { it.size > 1 }.flatten().mapTo(HashSet()) { it.key }
@@ -98,19 +105,23 @@ internal class SvgaDeferredImages(
     }
 
     fun requestPrefetch() = synchronized(lock) {
-        if (!closed && prefetchStarted && !retainAll && window.drop(1).any { frame ->
-                byFrame[frame].orEmpty().any { it !in bitmaps && it !in decodeErrors }
+        if (!closed && prefetchStarted && window.drop(1).any { frame ->
+                byFrame[frame].orEmpty().any { !hasPixels(it) && it !in decodeErrors }
             }) prefetchRequests.trySend(Unit)
         Unit
     }
 
-    /** Warm a bounded window before the clock starts; later refills run independently of it. */
+    /** Progressive playback waits only for its starting frame; lookahead runs on a worker. */
     fun preparePlayback(frame: Int) {
         val ticket = synchronized(lock) {
             if (closed) return
             if (prefetchEnabled && requestedFrame >= 0 && requestedFrame != frame) null else request(frame)
         }
-        if (ticket != null) { prepare(frame, ticket); prefetch(ticket) }
+        if (ticket != null) {
+            prepare(frame, ticket)
+            // Preserve the established warm-window behavior for explicit pool-only resources.
+            if (synchronized(lock) { shared == null }) prefetch(ticket)
+        }
         synchronized(lock) {
             if (closed || !prefetchEnabled || prefetchStarted) return
             prefetchStarted = true
@@ -130,13 +141,16 @@ internal class SvgaDeferredImages(
     private fun prefetch(ticket: Long, context: CoroutineContext = EmptyCoroutineContext): Unit = synchronized(decodeLock) {
         context.ensureActive()
         val frames = synchronized(lock) {
-            if (closed || !prefetchEnabled || retainAll || generation != ticket) return
-            if (byFrame[window.firstOrNull()].orEmpty().any { it !in bitmaps }) return
+            if (closed || !prefetchEnabled || generation != ticket) return
+            if (byFrame[window.firstOrNull()].orEmpty().any { !hasPixels(it) }) return
             window.drop(1)
         }
+        var sharedPrefetchBytes = 0L
         for (frame in frames) {
             val keys = synchronized(lock) { byFrame[frame].orEmpty().toList() }
             for (key in keys) {
+                val cost = synchronized(lock) { if (hasPixels(key)) 0L else shared?.decodedBytes(key) ?: 0L }
+                if (cost > MAX_BUFFER_BYTES - sharedPrefetchBytes) return
                 try { if (!decode(key, ticket, speculative = true, context = context)) return }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
@@ -144,24 +158,27 @@ internal class SvgaDeferredImages(
                     synchronized(lock) { if (!closed) decodeErrors[key] = e }
                     return
                 }
+                sharedPrefetchBytes += cost
             }
         }
     }
 
-    fun bitmap(key: String): Bitmap? = synchronized(lock) { bitmaps[key]?.bitmap }
+    private fun hasPixels(key: String) = bitmaps.containsKey(key) || shared?.bitmap(key) != null
+    fun bitmap(key: String): Bitmap? = synchronized(lock) { bitmaps[key]?.bitmap ?: shared?.bitmap(key) }
     fun beginDraw(frame: Int) = synchronized(lock) { drawingFrames[frame] = (drawingFrames[frame] ?: 0) + 1 }
     fun endDraw(frame: Int) = synchronized(lock) {
         val count = (drawingFrames[frame] ?: 1) - 1
         if (count == 0) drawingFrames.remove(frame) else drawingFrames[frame] = count
         Unit
     }
-    val allocationBytes: Long get() = synchronized(lock) { allocatedBytes }
+    val allocationBytes: Long get() = synchronized(lock) { allocatedBytes + (shared?.allocationBytes ?: 0L) }
+    // Looping needs to pin only private mutable images. Resource-owned images stay cached lazily.
     fun allReady(): Boolean = synchronized(lock) { closed || sources.keys.all { bitmaps.containsKey(it) } }
     fun size(key: String): android.util.Size? = synchronized(lock) {
-        sources[key]?.let { android.util.Size(it.width, it.height) }
+        sources[key]?.let { android.util.Size(it.width, it.height) } ?: shared?.size(key)
     }
     fun isReady(frame: Int): Boolean = synchronized(lock) {
-        closed || byFrame[frame].orEmpty().all { bitmaps.containsKey(it) }
+        closed || byFrame[frame].orEmpty().all { hasPixels(it) }
     }
 
     /** Call on a worker before publishing the new frame; the currently displayed pixels stay live. */
@@ -197,6 +214,14 @@ internal class SvgaDeferredImages(
     private fun decode(key: String, ticket: Long? = null, speculative: Boolean = false,
                        context: CoroutineContext = EmptyCoroutineContext): Boolean {
         context.ensureActive()
+        val sharedImages = synchronized(lock) {
+            if (closed || (ticket != null && ticket != generation)) return false
+            shared?.takeIf { it.contains(key) }
+        }
+        if (sharedImages != null) {
+            sharedImages.decode(key, context)
+            return true
+        }
         val image: SvgaDeferredImage
         val reusable: Boolean
         val candidate: Bitmap?
@@ -256,6 +281,7 @@ internal class SvgaDeferredImages(
             result?.takeUnless { it.isRecycled }?.recycle()
             candidate?.takeUnless { it.isRecycled }?.recycle()
             synchronized(lock) { if (!closed) allocatedBytes -= reservation }
+            synchronized(lock) { shared }?.reportDecodeError(e)
             throw e
         }
     }
@@ -325,7 +351,7 @@ internal class SvgaDeferredImages(
         bitmaps.forEach { (key, pixels) ->
             if (!pixels.usedByHardware && sources.getValue(key).frame !in drawingFrames) pixels.bitmap.recycle()
         }
-        bitmaps.clear(); sources = emptyMap(); byFrame = emptyMap()
+        bitmaps.clear(); sources = emptyMap(); byFrame = emptyMap(); shared = null
         reusableKeys.clear()
         window = emptyList(); decodeErrors.clear(); drawingFrames.clear()
         allocatedBytes = 0; poolBytes = 0

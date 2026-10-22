@@ -100,7 +100,7 @@ class SvgaInBitmapComparisonTest {
                 scenario.onActivity {
                     start = SystemClock.elapsedRealtimeNanos()
                     view.loadSvga(SvgaRequest(SvgaSource.LocalFile(sample!!), width, height)) {
-                        this.loader = loader; iterations = 1; inBitmap = mode == "stream"
+                        this.loader = loader; iterations = 1; inBitmap = mode == "stream"; progressive = false
                         skipInvisibleImages = mode != "default"
                         onReady = {
                             val entity = (view.drawable as SVGADrawable).videoItem

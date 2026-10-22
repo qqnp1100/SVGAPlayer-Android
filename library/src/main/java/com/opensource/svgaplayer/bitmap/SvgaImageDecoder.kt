@@ -11,6 +11,35 @@ import java.nio.ByteBuffer
 import kotlin.math.roundToInt
 
 internal object SvgaImageDecoder {
+    private const val DENSITY = 1_000_000
+
+    private data class FactoryScale(val sampleSize: Int, val scaled: Boolean, val targetDensity: Int) {
+        fun upperBound(size: Int): Long {
+            val sampled = (size.toLong() + sampleSize - 1) / sampleSize
+            return if (scaled) (sampled * targetDensity + DENSITY - 1) / DENSITY else sampled
+        }
+    }
+
+    private fun factoryScale(sourceWidth: Int, sourceHeight: Int, width: Int, height: Int): FactoryScale {
+        var sampleSize = 1
+        while (sourceWidth / (sampleSize * 2) >= width && sourceHeight / (sampleSize * 2) >= height) {
+            sampleSize *= 2
+        }
+        val scale = maxOf(width.toDouble() / sourceWidth, height.toDouble() / sourceHeight) * sampleSize
+        return FactoryScale(sampleSize, scale < 1.0, (DENSITY * scale).roundToInt().coerceAtLeast(1))
+    }
+
+    /** Immutable pixel reservation, including codec sampling and native density rounding. */
+    fun sharedByteBudget(sourceWidth: Int, sourceHeight: Int, width: Int, height: Int): Long {
+        val (reservedWidth, reservedHeight) = if (Build.VERSION.SDK_INT >= 28) width.toLong() to height.toLong()
+        else factoryScale(sourceWidth, sourceHeight, width, height).let {
+            it.upperBound(sourceWidth) to it.upperBound(sourceHeight)
+        }
+        // Saturate invalidly large headers so callers reject them without overflowing the budget.
+        return if (reservedWidth > Long.MAX_VALUE / 4 / reservedHeight) Long.MAX_VALUE
+            else reservedWidth * reservedHeight * 4
+    }
+
     fun decode(file: File?, bytes: ByteArray?, sourceWidth: Int, sourceHeight: Int,
                width: Int, height: Int, options: SvgaDecodeOptions,
                inBitmap: Bitmap? = null, mutable: Boolean = false): Bitmap? {
@@ -25,6 +54,7 @@ internal object SvgaImageDecoder {
                 decoder.setTargetSize(width, height)
             }
         } else {
+            val scale = factoryScale(sourceWidth, sourceHeight, width, height)
             val opts = BitmapFactory.Options().apply {
                 inMutable = mutable || inBitmap != null
                 this.inBitmap = inBitmap
@@ -32,15 +62,11 @@ internal object SvgaImageDecoder {
                 if (mutable && Build.VERSION.SDK_INT >= 26) {
                     inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
                 }
-                inSampleSize = 1
-                while (sourceWidth / (inSampleSize * 2) >= width && sourceHeight / (inSampleSize * 2) >= height) {
-                    inSampleSize *= 2
-                }
                 // Native density scaling avoids an application-side full-size bitmap + resized copy.
-                val scale = maxOf(width.toDouble() / sourceWidth, height.toDouble() / sourceHeight) * inSampleSize
-                inScaled = scale < 1.0
-                inDensity = 1_000_000
-                inTargetDensity = (inDensity * scale).roundToInt().coerceAtLeast(1)
+                inSampleSize = scale.sampleSize
+                inScaled = scale.scaled
+                inDensity = DENSITY
+                inTargetDensity = scale.targetDensity
             }
             fun decode() = if (file != null) BitmapFactory.decodeFile(file.path, opts)
                 else requireNotNull(bytes).let { BitmapFactory.decodeByteArray(it, 0, it.size, opts) }

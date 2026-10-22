@@ -10,6 +10,8 @@ data class SvgaDecodeOptions(
     val skipInvisibleImages: Boolean = false,
     /** Resource loader: defer images with exactly one visible layer/frame reference. */
     val inBitmap: Boolean = false,
+    /** Decode shared images when their first visible frame is prepared. */
+    val progressive: Boolean = false,
 ) {
     init {
         require(bitmapConfig == Bitmap.Config.ARGB_8888 || bitmapConfig == Bitmap.Config.RGB_565) {

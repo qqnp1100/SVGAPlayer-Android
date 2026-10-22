@@ -18,15 +18,17 @@ import java.io.InputStream
 import java.util.zip.InflaterInputStream
 import java.util.zip.ZipInputStream
 
-/** Shared immutable data. Deferred images keep encoded bytes; their pixels belong to presentations. */
+/** Shared animation data and immutable pixels. Mutable pooled pixels belong to presentations. */
 class SvgaResource private constructor(private val data: SVGAVideoEntity) {
     val width get() = data.videoSize.width.toInt()
     val height get() = data.videoSize.height.toInt()
     val frames get() = data.frames
     val fps get() = data.FPS
+    val hasImageDecodeError: Boolean get() = data.sharedImages?.hasDecodeError == true
     val layerKeys: List<String> get() = data.spriteList.mapNotNull { it.imageKey }.filterNot { it.endsWith(".matte") }.distinct()
     val sizeBytes: Long get() = audioTracks.sumOf { it.bytes.size.toLong() } + data.imageMap.values.sumOf { it.allocationByteCount.toLong() } +
         data.deferredImageSources.values.sumOf { it.bytes.size.toLong() } +
+        (data.sharedImages?.sizeBytes ?: 0L) +
         data.frameStorageBytes + 1024
     fun newVideoEntity(): SVGAVideoEntity = SVGAVideoEntity(data).also { it.resource = this }
     fun layerSize(key: String): android.util.Size? {
@@ -61,7 +63,8 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
         /** Caller supplies a private staging directory, which may be removed after this returns. */
         suspend fun decode(input: InputStream, directory: File, width: Int = 0, height: Int = 0,
             maxDecodedBytes: Long = MAX_EXPANDED_BYTES,
-            decodeOptions: SvgaDecodeOptions = SvgaDecodeOptions.defaults): SvgaResource {
+            decodeOptions: SvgaDecodeOptions = SvgaDecodeOptions.defaults,
+            onImageDecodeError: () -> Unit = {}): SvgaResource {
             val job = currentCoroutineContext()
             fun bounded(stream: InputStream, limit: Long) = object : FilterInputStream(stream) {
                 var total = 0L
@@ -121,6 +124,7 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
             val viewportScale = if (width > 0 && height > 0)
                 maxOf(width / video.videoSize.width, height / video.videoSize.height) else Double.NaN
             var pixels = 0L
+            val sharedSources = HashMap<String, SvgaDeferredImage>()
             for (key in keys) {
                 job.ensureActive()
                 if (key in audioKeys) continue
@@ -147,6 +151,15 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                         opts.outWidth, opts.outHeight, target.first, target.second, decodeOptions)
                     continue
                 }
+                if (decodeOptions.progressive) {
+                    val reserved = SvgaImageDecoder.sharedByteBudget(opts.outWidth, opts.outHeight, target.first, target.second)
+                    require(reserved <= maxDecodedBytes - pixels) { "Decoded image budget exceeded" }
+                    sharedSources[key.removeSuffix(".matte")] = SvgaDeferredImage(
+                        file?.readBytes() ?: requireNotNull(bytes), -1,
+                        opts.outWidth, opts.outHeight, target.first, target.second, decodeOptions)
+                    pixels += reserved
+                    continue
+                }
                 // RGB_565 is a preference: alpha images can still require four bytes per pixel.
                 require(target.first.toLong() <= (maxDecodedBytes - pixels) / 4 / target.second) {
                     "Decoded image budget exceeded"
@@ -160,6 +173,21 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                 pixels += bitmap.allocationByteCount
                 video.imageMap[key.removeSuffix(".matte")] = bitmap.apply { prepareToDraw() }
             }
+            if (sharedSources.isNotEmpty() || (decodeOptions.progressive && video.deferredImageSources.isNotEmpty())) {
+                val frameKeys = HashMap<Int, MutableSet<String>>()
+                video.spriteList.forEach { sprite ->
+                    job.ensureActive()
+                    val imageKey = sprite.imageKey ?: return@forEach
+                    val key = imageKey.removeSuffix(".matte")
+                    if (key !in sharedSources) return@forEach
+                    sprite.frames.forEachIndexed { frame, data ->
+                        if (imageKey.endsWith(".matte") || !(data.alpha <= 0.0)) {
+                            frameKeys.getOrPut(frame) { LinkedHashSet() }.add(key)
+                        }
+                    }
+                }
+                video.sharedImages = SvgaSharedImages(sharedSources, frameKeys.mapValues { it.value.toList() }, onImageDecodeError)
+            }
             video.deferredImageBudget = maxDecodedBytes - pixels
             video.deferredImageSources.values.groupBy { it.frame }.values.forEach { imagesInFrame ->
                 require(imagesInFrame.sumOf { it.width.toLong() * it.height * 4 } <= video.deferredImageBudget) {
@@ -172,7 +200,7 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                 frame.shapes.forEach { it.buildPath() }
                 frame.maskPath?.buildPath(scratch)
             } }
-            // Only deferred images retain encoded bytes, independent of temporary staging files.
+            // Lazy images retain their bytes independently of temporary staging files.
             val resource = SvgaResource(video)
             resource.audioTracks = video.movieItem?.audios.orEmpty().mapNotNull { audio ->
                 images[audio.audioKey]?.let { SvgaAudioTrack(it.toByteArray(), audio.startFrame ?: 0,

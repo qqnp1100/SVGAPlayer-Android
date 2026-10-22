@@ -65,4 +65,15 @@ class ResourceMemoryCacheTest {
         assertTrue(request.copy(cachePolicy = SvgaCachePolicy.NONE, weakMemoryCache = true).usesWeakMemory)
         assertTrue(request.copy(memoryCache = false, memoryWrite = true).writesMemory)
     }
+    @Test fun lateFailureCannotBeReadOrRepublishedThroughEitherCacheTier() {
+        class Value(var valid: Boolean = true)
+        val cache = ResourceMemoryCache<Value>(10, { it.valid }) { 1 }
+        val value = Value()
+        cache.put("body", "source", Long.MAX_VALUE, value, true, true)
+        value.valid = false
+        assertNull(cache.find("source", true, true, true))
+        assertNull(cache.findKey("body", true, true))
+        cache.put("body", "new-source", Long.MAX_VALUE, value, true, true)
+        assertNull(cache.find("new-source", true, true, true))
+    }
 }

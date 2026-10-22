@@ -317,7 +317,7 @@ class SvgaInBitmapTest {
                         val view = SVGAImageView(activity); views.add(view)
                         root.addView(view, FrameLayout.LayoutParams(64, 64).apply { topMargin = index * 72 })
                         view.loadSvga(SvgaSource.LocalFile(file)) {
-                            this.loader = loader; iterations = 1; inBitmap = index < 4
+                            this.loader = loader; iterations = 1; inBitmap = index < 4; progressive = false
                             reverse = index % 2 == 1; startFrame = if (reverse) 2 else 0
                             onReady = { ready.countDown() }
                             onFinished = { if (index == 0) clearedCompletions.incrementAndGet() else finished.countDown() }
@@ -505,7 +505,7 @@ class SvgaInBitmapTest {
                     var failure: Throwable? = null
                     scenario.onActivity {
                         previous = view.loadSvga(SvgaSource.LocalFile(file)) {
-                            inBitmap = enabled; this.iterations = iterations; staticImage = static; autoPlay = false
+                            inBitmap = enabled; this.iterations = iterations; staticImage = static; autoPlay = false; progressive = false
                             onReady = { ready.countDown() }; onError = { failure = it; ready.countDown() }
                         }
                     }
@@ -517,7 +517,7 @@ class SvgaInBitmapTest {
                 }
                 scenario.onActivity {
                     val replacement = view.loadSvga(SvgaSource.LocalFile(file)) {
-                        inBitmap = false; iterations = 1; autoPlay = false
+                        inBitmap = false; iterations = 1; autoPlay = false; progressive = false
                     }
                     assertNotSame(previous, replacement)
                     view.clearSvga(); assertNull(view.drawable)

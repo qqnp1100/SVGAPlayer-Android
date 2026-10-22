@@ -4,7 +4,8 @@ import java.lang.ref.ReferenceQueue
 import java.lang.ref.WeakReference
 
 /** All operations are serialized; values in the weak index never keep resources alive. */
-internal class ResourceMemoryCache<V : Any>(private val maxBytes: Long, private val sizeOf: (V) -> Long) {
+internal class ResourceMemoryCache<V : Any>(private val maxBytes: Long,
+    private val isValid: (V) -> Boolean = { true }, private val sizeOf: (V) -> Long) {
     data class Hit<V>(val value: V, val weak: Boolean, val key: String, val expires: Long)
     private data class Strong<V>(val value: V, val bytes: Long)
     private data class Alias(val key: String, val expires: Long)
@@ -33,27 +34,28 @@ internal class ResourceMemoryCache<V : Any>(private val maxBytes: Long, private 
         val now = System.currentTimeMillis()
         if (readStrong) aliases[lookup]?.let { alias ->
             if (cacheOnly || alias.expires > now) strong[alias.key]?.let {
-                return Hit(it.value, false, alias.key, alias.expires)
+                if (isValid(it.value)) return Hit(it.value, false, alias.key, alias.expires)
             }
         }
         if (readWeak) weakAliases[lookup]?.let { entry ->
             val value = entry.get()
             if (value == null) remove(entry)
-            else if (cacheOnly || entry.expires > now) return Hit(value, true, entry.key, entry.expires)
+            else if (isValid(value) && (cacheOnly || entry.expires > now)) return Hit(value, true, entry.key, entry.expires)
         }
         return null
     }
     @Synchronized fun findKey(key: String, readStrong: Boolean, readWeak: Boolean): Hit<V>? {
         drain()
-        if (readStrong) strong[key]?.let { return Hit(it.value, false, key, 0) }
+        if (readStrong) strong[key]?.let { if (isValid(it.value)) return Hit(it.value, false, key, 0) }
         if (readWeak) weak[key]?.let { entry ->
             val value = entry.get()
-            if (value == null) remove(entry) else return Hit(value, true, key, entry.expires)
+            if (value == null) remove(entry) else if (isValid(value)) return Hit(value, true, key, entry.expires)
         }
         return null
     }
     @Synchronized fun put(key: String, lookup: String, expires: Long, value: V, writeStrong: Boolean, writeWeak: Boolean) {
         drain()
+        if (!isValid(value)) return
         if (writeStrong || writeWeak) {
             if (aliases[lookup]?.key != key) aliases.remove(lookup)
             weakAliases[lookup]?.let { if (it.key != key) weakAliases.remove(lookup) }

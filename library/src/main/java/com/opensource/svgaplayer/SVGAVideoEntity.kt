@@ -69,6 +69,7 @@ class SVGAVideoEntity {
     internal val deferredImageSources = HashMap<String, SvgaDeferredImage>()
     internal var deferredImageBudget = 0L
     internal var deferredImages: SvgaDeferredImages? = null
+    internal var sharedImages: SvgaSharedImages? = null
     private var mCacheDir: File
     private var mFrameHeight = 0
     private var mFrameWidth = 0
@@ -93,8 +94,9 @@ class SVGAVideoEntity {
         spriteList = resource.spriteList
         frameStorageBytes = resource.frameStorageBytes
         imageMap.putAll(resource.imageMap)
-        deferredImages = resource.deferredImageSources.takeIf { it.isNotEmpty() }?.let {
-            SvgaDeferredImages(it.toMap(), resource.deferredImageBudget)
+        sharedImages = resource.sharedImages
+        if (resource.deferredImageSources.isNotEmpty() || sharedImages != null) {
+            deferredImages = SvgaDeferredImages(resource.deferredImageSources.toMap(), resource.deferredImageBudget, sharedImages)
         }
         scaleMap.putAll(resource.scaleMap)
         isParser = true
@@ -145,7 +147,7 @@ class SVGAVideoEntity {
 
     internal fun bitmap(key: String): Bitmap? = imageMap[key] ?: deferredImages?.bitmap(key)
 
-    @Deprecated("Deprecated since 3.0.0. Modern loaders decode and prepare SvgaResource images before returning.")
+    @Deprecated("Deprecated since 3.0.0. Modern loaders prepare resource images on worker threads.")
     public suspend fun parserImages(view: View) {
         synchronized(imageMap) {
             if (isParser || isClean) return
@@ -565,6 +567,7 @@ class SVGAVideoEntity {
     fun clear() {
         synchronized(imageMap) { isClean = true }
         deferredImages?.close(); deferredImages = null
+        sharedImages = null
         deferredImageSources.clear()
         resource = null
         movieItem = null

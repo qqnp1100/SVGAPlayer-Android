@@ -386,7 +386,27 @@ val engine = SvgaEngine(context, weakMemoryCacheEnabled = false)
 
 两个请求开关均为 nullable：null 继承 `cachePolicy.memory`。默认 ALL（以及 MEMORY）启用两层，NONE / DISK 默认关闭两层；显式 true / false 可独立覆盖。例如 `memoryCache = false` 不会关闭默认弱缓存。既有 `memoryRead` / `memoryWrite` 优先于 `memoryCache`，仅控制强缓存读写；若要禁用所有资源内存缓存，还需设置 `weakMemoryCache = false`。View/Compose 未设置开关时保留传入 SvgaRequest 的配置；设置后覆盖对应字段。
 
-`loadSvga` 可为单次播放启用按需图片解码，默认 `inBitmap = false`：
+### 首帧就绪与后台预取
+
+Coil / Glide 的 `loadSvga` 默认启用 `progressive = true`。加载完整文件并解析动画、读取各图片尺寸后，只等待实际起播帧需要的图片（倒放时为区间末帧），然后启动播放；后续最多三帧按播放方向在后台预取，单次预取新增共享像素受 16 MiB 预算限制。循环、重播、seek 直接复用已解码的图片；实际缺帧时暂停播放时钟与音频，图片就绪后继续。`onReady` 表示展示准备完成，不再表示整段动画的 Bitmap 已全部解码。自定义 `onResourceReady` 接管实体时仍由业务决定何时绑定、准备和播放。
+
+```kotlin
+svgaView.loadSvga(url) { progressive = true } // 默认；支持循环与单次播放
+svgaView.loadSvga(url) { progressive = false } // 恢复全量预解码
+
+// 提前解析的资源使用相同模式，后续 loadSvga 可以命中相同的资源缓存。
+loader.preDownload(SvgaRequest(url).copy(progressive = true), parseAfterDownload = true)
+```
+
+共享资源保存完整的压缩图片数据，不依赖会被清理的临时解压目录；同一 key 并发解码合并，完成的只读 Bitmap 保留供多个 View 和后续缓存命中复用。每个 View 独立控制预取窗口和取消，清理 View、LRU 淘汰或 `clearMemory()` 均不回收其他实例仍在绘制的共享 Bitmap。强 LRU、弱索引及资源解码合并键包含 `progressive`，继续保留尺寸、格式、来源版本和其他解码选项的区分；原始文件下载和磁盘缓存仍可共享。
+
+LRU 在资源入缓存时即计入编码数据、索引与未来全部共享像素的保守预算，权重不会随后台解码增长而被低估；这项权重可能高于当前实际像素分配量。内存策略、HTTP 新鲜度、refresh、cacheOnly、no-store 仍遵循原有规则。延后发现的共享图片解码错误会失效对应正文的内存和磁盘缓存，并按正文摘要保护刷新后的新版本。
+
+`staticImage` 默认只准备第 0 帧，不启动预取或音频。Compose 仍强制全量预解码，以免绘制阶段等待图片。直接调用 `SvgaImageLoader.load` / `SvgaEngine.acquire` 的 `SvgaRequest` 以及 `SvgaResource.decode` 默认保持全量；自定义帧调度器可显式设置 `progressive = true`，并在工作线程准备帧。
+
+### 单次播放的 Bitmap 复用
+
+`loadSvga` 可额外为单次播放启用 Bitmap 复用，默认 `inBitmap = false`：
 
 ```kotlin
 svgaView.loadSvga(url) {
@@ -395,9 +415,9 @@ svgaView.loadSvga(url) {
 }
 ```
 
-开启后按可见图层/帧引用总次数分类：同一图片被多个帧或图层引用时仍预解码；只有一次可见引用的图片保留压缩数据，并在后台按播放方向提前解码当前帧及后续最多三帧。按实际解码宽、高统计这些单次图片：同分辨率至少有两张时，使用 `BitmapFactory.Options.inBitmap` 复用已退出绘制的可变 Bitmap；同分辨率只有一张时，仅使用普通解码器按需解码，不取用也不进入复用池。不可见且未使用的图片不解码，遮罩引用保守计入。每个展示实例拥有独立的像素和有容量限制的复用池，压缩数据计入共享资源缓存大小。首个展示帧及预算允许的预取窗口准备完成后才启动播放。预取受 16 MiB 缓冲阈值及剩余解码预算限制，当前帧、解码中、等待硬件提交释放及池内像素均计入预算；预算不足时停止提前解码。每个实例串行解码，全局同时最多两个后台预取任务。绘制会保留窗口内的未来帧，seek/倒放会更新窗口，取消或替换后不会发布过期结果。已就绪帧的绘制不等待预取锁；仅实际缺帧时暂停播放时钟与音频，解码完成后从完成时刻恢复计时。解码结果会提前准备绘制缓存，主线程不等待图片解码。
+开启后按可见图层/帧引用总次数分类：重复引用的图片由共享资源管理，遵循 progressive 选项；只有一次可见引用的图片保留压缩数据，像素归展示实例所有，并在后台按播放方向提前解码当前帧及后续最多三帧。按实际解码宽、高统计这些单次图片：同分辨率至少有两张时，使用 `BitmapFactory.Options.inBitmap` 复用已退出绘制的可变 Bitmap；同分辨率只有一张时，仅使用普通解码器按需解码，不取用也不进入复用池。不可见且未使用的图片不解码，遮罩引用保守计入。每个展示实例拥有独立的像素和有容量限制的复用池，压缩数据计入共享资源缓存大小。启用 progressive 时只等待首个展示帧，预取不阻塞起播；关闭 progressive 时保留原有的起播前预热窗口。预取受 16 MiB 缓冲阈值及剩余解码预算限制，当前帧、解码中、等待硬件提交释放及池内像素均计入预算；预算不足时停止提前解码。每个实例串行解码，全局同时最多两个后台预取任务。绘制会保留窗口内的未来帧，seek/倒放会更新窗口，取消或替换后不会发布过期结果。已就绪帧的绘制不等待预取锁；仅实际缺帧时暂停播放时钟与音频，解码完成后从完成时刻恢复计时。解码结果会提前准备绘制缓存，主线程不等待图片解码。
 
-仅 `iterations = 1` 且非 `staticImage` 时生效，循环及静态展示保持全量预解码。使用 `useViewControls = true` 时以加载前的 `svgaView.loops = 1` 为准。Compose `SvgaView` 始终使用全量预解码，即使传入的 `SvgaRequest` 设置了 `inBitmap = true`，以免在绘制阶段等待解码。开关参与资源缓存和 View 重绑定身份，默认资源与按需资源不会混用。跳转或再次播放会重新解码已被覆盖的单次图片；保留最后显示帧，直到展示被替换或清理。Android 28+ 参与复用的单次图片使用 BitmapFactory，分辨率唯一的单次图片及重复图片继续使用原有解码器。
+Bitmap 复用仅 `iterations = 1` 且非 `staticImage` 时生效；循环及静态展示仍遵循 progressive 的按帧准备策略。使用 `useViewControls = true` 时以加载前的 `svgaView.loops = 1` 为准。Compose `SvgaView` 始终使用全量预解码，即使传入的 `SvgaRequest` 设置了 `inBitmap = true` 或 `progressive = true`，以免在绘制阶段等待解码。开关参与资源缓存和 View 重绑定身份，默认资源与按需资源不会混用。跳转或再次播放会重新解码已被覆盖的单次图片；保留最后显示帧，直到展示被替换或清理。Android 28+ 参与复用的单次图片使用 BitmapFactory，分辨率唯一的单次图片及重复图片继续使用原有解码器。
 
 查询顺序是强 LRU → 弱索引 → 磁盘/网络；弱命中允许按当前请求配置提升到强 LRU。弱索引与强缓存都检查来源、尺寸和新鲜度，refresh 绕过并失效两层，no-store 不登记可复用资源。`clearMemory()` 清空两层索引，不回收播放实例正在使用的资源。`memoryHits` 记录强命中，`weakMemoryHits` 单独记录弱命中。
 
