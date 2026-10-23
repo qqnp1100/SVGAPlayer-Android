@@ -21,7 +21,7 @@ class SvgaImageLoader(context: Context, val engine: SvgaEngine = SvgaEngine.get(
         onDownloadProgress: (suspend (SvgaDownloadProgress) -> Unit)? = request.onDownloadProgress): SvgaResource = operation {
         val options = request.resolveDecodeOptions()
         val snapshot = request.copy(headers = request.headers.toMap(), onDownloadProgress = onDownloadProgress,
-            bitmapConfig = options.bitmapConfig, skipInvisibleImages = options.skipInvisibleImages)
+            bitmapConfig = options.bitmapConfig, skipInvisibleImages = options.skipInvisibleImages, renderScale = options.renderScale)
         val builder = imageLoader.`as`(SvgaResource::class.java).load(SvgaGlideModel(engine, snapshot))
             .skipMemoryCache(true).diskCacheStrategy(DiskCacheStrategy.NONE).onlyRetrieveFromCache(false).dontTransform()
         withGlideResource(imageLoader, builder) { it }

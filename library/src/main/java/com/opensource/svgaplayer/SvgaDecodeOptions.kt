@@ -12,8 +12,13 @@ data class SvgaDecodeOptions(
     val inBitmap: Boolean = false,
     /** Decode shared images when their first visible frame is prepared. */
     val progressive: Boolean = false,
+    /** Multiply the existing base-bitmap target dimensions by this scale, in (0, 1]. */
+    val renderScale: Float = 1f,
 ) {
     init {
+        require(renderScale.isFinite() && renderScale > 0f && renderScale <= 1f) {
+            "SVGA renderScale must be finite and in (0, 1]"
+        }
         require(bitmapConfig == Bitmap.Config.ARGB_8888 || bitmapConfig == Bitmap.Config.RGB_565) {
             "SVGA bitmapConfig must be ARGB_8888 or RGB_565"
         }

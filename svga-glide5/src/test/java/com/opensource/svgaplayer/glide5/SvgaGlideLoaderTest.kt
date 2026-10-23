@@ -15,6 +15,7 @@ import com.bumptech.glide.request.target.Target
 import com.opensource.svgaplayer.SVGADynamicEntity
 import com.opensource.svgaplayer.SVGADrawable
 import com.opensource.svgaplayer.SVGAImageView
+import com.opensource.svgaplayer.SvgaDecodeOptions
 import com.opensource.svgaplayer.loader.*
 import kotlinx.coroutines.*
 import okhttp3.mockwebserver.MockResponse
@@ -280,6 +281,54 @@ class SvgaGlideLoaderTest {
     }
 
     @Test fun viewControlsPreservePlayingFrameWhenBindingsChange() = assertViewControlsSurviveBindingUpdate(true)
+
+    @Test fun viewRenderScaleOverridesRequestAndGlobalDefaultsAndInvalidatesRebind() {
+        val defaults = SvgaDecodeOptions.defaults
+        val file = temporary.newFile("scaled.svga").apply { writeBytes(data) }
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().visible()
+        try {
+            SvgaDecodeOptions.defaults = defaults.copy(renderScale = .5f)
+            val root = FrameLayout(activity.get())
+            val view = SVGAImageView(activity.get())
+            activity.get().setContentView(root)
+            root.addView(view, FrameLayout.LayoutParams(192, 192))
+            view.layout(0, 0, 192, 192)
+            val request = SvgaRequest(file).copy(width = 192, height = 192, renderScale = .25f)
+            fun load(source: SvgaRequest, scale: Float?): SvgaViewHandle {
+                val ready = CompletableDeferred<Unit>()
+                val handle = view.loadSvga(source) {
+                    loader = this@SvgaGlideLoaderTest.loader
+                    staticImage = true
+                    renderScale = scale
+                    onReady = { ready.complete(Unit) }
+                    onError = { ready.completeExceptionally(it) }
+                }
+                await(scope.async { ready.await() })
+                return handle
+            }
+            val full = load(request, 1f)
+            val same = view.loadSvga(request) {
+                loader = this@SvgaGlideLoaderTest.loader; staticImage = true; renderScale = 1f
+            }
+            assertSame(full, same)
+            runTask { loader.load(request.copy(renderScale = 1f, progressive = true)) }
+            assertEquals(1, engine.decodeCount.get())
+
+            val quarter = load(request, null)
+            assertNotSame(full, quarter)
+            runTask { loader.load(request.copy(progressive = true)) }
+            assertEquals(2, engine.decodeCount.get())
+
+            val half = load(request.copy(renderScale = null), null)
+            assertNotSame(quarter, half)
+            runTask { loader.load(request.copy(renderScale = .5f, progressive = true)) }
+            assertEquals(3, engine.decodeCount.get())
+            view.clearSvga()
+        } finally {
+            SvgaDecodeOptions.defaults = defaults
+            activity.pause().stop().destroy()
+        }
+    }
 
     @Test fun viewControlsPreservePausedFrameWhenBindingsChange() = assertViewControlsSurviveBindingUpdate(false)
 

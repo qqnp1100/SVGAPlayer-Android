@@ -90,6 +90,7 @@ fun SvgaView(
     weakMemoryCache: Boolean? = null,
     bitmapConfig: android.graphics.Bitmap.Config? = null,
     skipInvisibleImages: Boolean? = null,
+    renderScale: Float? = null,
 ) {
     require(iterations >= 0 && speed > 0 && speed.isFinite())
     val context = LocalContext.current
@@ -97,11 +98,12 @@ fun SvgaView(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val direction = LocalLayoutDirection.current
     val decodeDefaults = SvgaDecodeOptions.defaults
-    val request = remember(source, cachePolicy, memoryCache, weakMemoryCache, bitmapConfig, skipInvisibleImages, decodeDefaults) {
+    val request = remember(source, cachePolicy, memoryCache, weakMemoryCache, bitmapConfig, skipInvisibleImages, renderScale, decodeDefaults) {
         val base = (source as? SvgaRequest) ?: SvgaRequest(SvgaSource.from(source), cachePolicy = cachePolicy)
         base.copy(memoryCache = memoryCache ?: base.memoryCache, weakMemoryCache = weakMemoryCache ?: base.weakMemoryCache,
             bitmapConfig = bitmapConfig ?: base.bitmapConfig ?: decodeDefaults.bitmapConfig,
             skipInvisibleImages = skipInvisibleImages ?: base.skipInvisibleImages ?: decodeDefaults.skipInvisibleImages,
+            renderScale = renderScale ?: base.renderScale ?: decodeDefaults.renderScale,
             // Compose draws synchronously; all pixels must be decoded before publishing the renderer.
             inBitmap = false, progressive = false)
     }

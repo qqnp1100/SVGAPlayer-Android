@@ -32,7 +32,10 @@ class SvgaImageLoader(context: Context, val engine: SvgaEngine = SvgaEngine.get(
     private val context = context.applicationContext
     val imageLoader = ImageLoader.Builder(this.context).components { add(SvgaFetcher.Factory(engine)) }.build()
     suspend fun load(request: SvgaRequest, onDownloadProgress: (suspend (SvgaDownloadProgress) -> Unit)? = request.onDownloadProgress): SvgaResource {
-        val result = imageLoader.execute(ImageRequest.Builder(context).data(request.copy(headers = request.headers.toMap(), onDownloadProgress = onDownloadProgress))
+        val options = request.resolveDecodeOptions()
+        val snapshot = request.copy(headers = request.headers.toMap(), onDownloadProgress = onDownloadProgress,
+            bitmapConfig = options.bitmapConfig, skipInvisibleImages = options.skipInvisibleImages, renderScale = options.renderScale)
+        val result = imageLoader.execute(ImageRequest.Builder(context).data(snapshot)
             .memoryCachePolicy(CachePolicy.DISABLED).diskCachePolicy(CachePolicy.DISABLED).build())
         return when (result) {
             is SuccessResult -> (result.image as SvgaLoadedImage).resource

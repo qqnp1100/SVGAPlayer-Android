@@ -30,6 +30,8 @@ class SvgaViewOptions {
     var weakMemoryCache: Boolean? = null
     var bitmapConfig: android.graphics.Bitmap.Config? = null
     var skipInvisibleImages: Boolean? = null
+    /** Base-bitmap resolution multiplier in (0, 1]; null inherits the request/global default. */
+    var renderScale: Float? = null
     /** Start after the first displayed frame is prepared; prefetch later images on workers. */
     var progressive = true
     /** Single playback only: decode single-use images during playback with a private Bitmap pool. */
@@ -120,6 +122,7 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
                     weakMemoryCache = options.weakMemoryCache ?: baseRequest.weakMemoryCache,
                     bitmapConfig = options.bitmapConfig ?: baseRequest.bitmapConfig ?: decodeDefaults.bitmapConfig,
                     skipInvisibleImages = options.skipInvisibleImages ?: baseRequest.skipInvisibleImages ?: decodeDefaults.skipInvisibleImages,
+                    renderScale = options.renderScale ?: baseRequest.renderScale ?: decodeDefaults.renderScale,
                     inBitmap = useInBitmap,
                     progressive = options.progressive,
                 )
@@ -330,7 +333,7 @@ class SvgaViewHandle internal constructor(view: SVGAImageView, private var sourc
             options.onResourceReady !== next.onResourceReady || options.useViewControls != next.useViewControls ||
             options.cachePolicy != next.cachePolicy || options.memoryCache != next.memoryCache || options.weakMemoryCache != next.weakMemoryCache ||
             options.bitmapConfig != next.bitmapConfig || options.skipInvisibleImages != next.skipInvisibleImages || options.inBitmap != next.inBitmap ||
-            options.progressive != next.progressive ||
+            options.progressive != next.progressive || options.renderScale != next.renderScale ||
             options.iterations != next.iterations || options.autoPlay != next.autoPlay || options.staticImage != next.staticImage || options.speed != next.speed ||
             options.startFrame != next.startFrame || options.endFrame != next.endFrame || options.reverse != next.reverse ||
             options.hiddenBehavior != next.hiddenBehavior ||

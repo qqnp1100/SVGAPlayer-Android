@@ -2,6 +2,7 @@ package com.opensource.svgaplayer.bitmap
 
 import kotlin.math.ceil
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 /** Maximum displayed dimensions for every visible use of one normalized image key. */
 internal class SvgaImageSize {
@@ -52,9 +53,15 @@ internal class SvgaImageSize {
     }
 
     companion object {
-        fun target(usage: SvgaImageSize?, sourceWidth: Int, sourceHeight: Int, viewportScale: Double): Pair<Int, Int> =
-            (usage ?: SvgaImageSize().apply {
+        fun target(usage: SvgaImageSize?, sourceWidth: Int, sourceHeight: Int, viewportScale: Double,
+                   renderScale: Float = 1f): Pair<Int, Int> {
+            val target = (usage ?: SvgaImageSize().apply {
                 include(sourceWidth.toDouble(), sourceHeight.toDouble(), 1.0, 0.0, 0.0, 1.0)
             }).target(sourceWidth, sourceHeight, viewportScale)
+            // Apply after the existing source-size cap and fallback, including unknown viewports.
+            if (renderScale == 1f) return target
+            return (target.first * renderScale.toDouble()).roundToInt().coerceAtLeast(1) to
+                (target.second * renderScale.toDouble()).roundToInt().coerceAtLeast(1)
+        }
     }
 }

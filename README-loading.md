@@ -10,16 +10,18 @@
 SvgaDecodeOptions.defaults = SvgaDecodeOptions(
     bitmapConfig = Bitmap.Config.RGB_565,
     skipInvisibleImages = true,
+    renderScale = 0.5f,
 )
 ```
 
-默认值为 `ARGB_8888`、`skipInvisibleImages = false`。配置对象不可变，整体赋值是线程安全的；每次加载捕获一次配置，修改全局默认不修改已经解码的资源。Compose 在下一次重组时读取新默认。
+默认值为 `ARGB_8888`、`skipInvisibleImages = false`、`renderScale = 1f`。配置对象不可变，整体赋值是线程安全的；每次加载捕获一次配置，修改全局默认不修改已经解码的资源。Compose 在下一次重组时读取新默认。
 
 ```kotlin
 // 单次请求覆盖；null 继承全局默认。
 val request = SvgaRequest(url).copy(
     bitmapConfig = Bitmap.Config.ARGB_8888,
     skipInvisibleImages = false,
+    renderScale = 1f, // 覆盖全局倍率，按原有尺寸逻辑加载。
 )
 loader.load(request)
 
@@ -27,15 +29,20 @@ loader.load(request)
 svgaView.loadSvga(url) {
     bitmapConfig = Bitmap.Config.RGB_565
     skipInvisibleImages = true
+    renderScale = 0.5f
 }
 
 // Compose 使用相同优先级。
-SvgaView(url, bitmapConfig = Bitmap.Config.ARGB_8888, skipInvisibleImages = true)
+SvgaView(url, bitmapConfig = Bitmap.Config.ARGB_8888, skipInvisibleImages = true, renderScale = 0.5f)
 ```
+
+`renderScale` 为有限浮点数，范围为 `(0, 1]`，非法值会报参数错误。它在现有图层/视口尺寸计算、原图尺寸上限和取整之后，再分别乘到 bitmap 宽高上，四舍五入且至少为 1 px。`1f` 保持现有逻辑；例如原本解码为 200×100，`0.5f` 解码目标为 100×50，同像素格式下像素内存约为原来的 1/4。未知展示尺寸、CENTER/None 或原图尺寸回退同样应用倍率。旧系统 BitmapFactory 的采样和密度取整可能使实际尺寸略大于目标，预算仍会校验实际分配量。
+
+倍率只影响 SVGA 基础图片的解码分辨率，动画尺寸、图层位置、点击区域和播放逻辑保持不变。普通加载、渐进加载和 `inBitmap` 延迟解码均使用相同比例。动态填充图片继续由各自图片加载器配置控制。Coil/Glide View 的优先级均为显式 `renderScale` > `SvgaRequest.renderScale` > 全局默认；Compose 相同。不同倍率区分强缓存、弱缓存和解码合并，仍共享兼容的下载和磁盘缓存。降低倍率会降低图片清晰度。
 
 颜色配置支持 `ARGB_8888`、`RGB_565` 两种首选格式。`RGB_565` 只适用于无需透明通道的图片，会降低颜色精度；带透明通道的图片保留透明度，不能保证内存减半。其他格式会报参数错误。基础图片始终使用软件 Bitmap，以兼容遮罩绘制；业务动态图片仍由对应图片加载器决定格式。这些配置均进入强缓存、弱缓存和解码合并的身份；不同配置仍共享兼容的下载和磁盘缓存。
 
-图片采样按图层 layout、旋转/镜像/缩放矩阵，以及实际请求像素尺寸计算，合并同一图片所有可见帧和图层的最大需求。缩小变换不会再被固定为至少 1 倍。Android 28+ 使用 ImageDecoder 指定输出尺寸，旧系统使用 BitmapFactory 采样与密度缩放，避免只按 2 的幂采样造成的尺寸浪费。未知请求尺寸保留原图，不放大原图；非等比视口保守采用较大缩放比例。View 的 CENTER、Compose 的 None 和自定义 ContentScale 保留原图尺寸。
+图片采样按图层 layout、旋转/镜像/缩放矩阵，以及实际请求像素尺寸计算，合并同一图片所有可见帧和图层的最大需求。缩小变换不会再被固定为至少 1 倍。Android 28+ 使用 ImageDecoder 指定输出尺寸，旧系统使用 BitmapFactory 采样与密度缩放，避免只按 2 的幂采样造成的尺寸浪费。默认 `renderScale = 1f` 时，未知请求尺寸保留原图，不放大原图；非等比视口保守采用较大缩放比例。View 的 CENTER、Compose 的 None 和自定义 ContentScale 也以原图尺寸为基础，再应用 `renderScale`。
 
 开启 `skipInvisibleImages` 后，未使用图片、普通图层全程 alpha <= 0 的图片会跳过解码。判断覆盖素材整个时间轴，不因 `startFrame/endFrame`、动态 hidden 或替换图片裁剪资源，保持 seek、倒放、重播和动态填充的能力；matte 图片保守保留。过滤不会删除图层元数据或改变帧数。它减少解码分配和资源常驻像素，不是播放结束自动释放或按帧延迟加载。
 
@@ -45,6 +52,7 @@ SvgaView(url, bitmapConfig = Bitmap.Config.ARGB_8888, skipInvisibleImages = true
 videoItem.decodeOptions = SvgaDecodeOptions.defaults.copy(
     bitmapConfig = Bitmap.Config.ARGB_8888,
     skipInvisibleImages = false,
+    renderScale = 0.5f,
 )
 svgaView.setVideoItem(videoItem)
 ```

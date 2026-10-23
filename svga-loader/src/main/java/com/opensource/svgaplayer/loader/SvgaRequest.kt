@@ -57,12 +57,18 @@ data class SvgaRequest(
     val inBitmap: Boolean = false,
     /** Load encoded images first; presentations decode and prefetch their visible frames. */
     val progressive: Boolean = false,
+    /** Base-bitmap resolution multiplier in (0, 1]. Null inherits the global default at load time. */
+    val renderScale: Float? = null,
 ) {
     init { require(width >= 0 && height >= 0); require(!(cacheOnly && refresh)) }
     constructor(source: Any) : this(SvgaSource.from(source))
     internal fun snapshot() = copy(headers = headers.toSortedMap().toMap())
     fun resolveDecodeOptions(defaults: SvgaDecodeOptions = SvgaDecodeOptions.defaults) = SvgaDecodeOptions(
-        bitmapConfig ?: defaults.bitmapConfig, skipInvisibleImages ?: defaults.skipInvisibleImages, inBitmap, progressive)
+        bitmapConfig = bitmapConfig ?: defaults.bitmapConfig,
+        skipInvisibleImages = skipInvisibleImages ?: defaults.skipInvisibleImages,
+        inBitmap = inBitmap,
+        progressive = progressive,
+        renderScale = renderScale ?: defaults.renderScale)
     val readsMemory get() = memoryRead ?: memoryCache ?: cachePolicy.memory
     val writesMemory get() = memoryWrite ?: memoryCache ?: cachePolicy.memory
     val usesWeakMemory get() = weakMemoryCache ?: cachePolicy.memory

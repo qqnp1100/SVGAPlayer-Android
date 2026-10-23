@@ -144,7 +144,7 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                     file = imageFile(bytes.toString(Charsets.UTF_8)); BitmapFactory.decodeFile(file.path, opts)
                 }
                 require(opts.outWidth > 0 && opts.outHeight > 0) { "Invalid image $key" }
-                val target = SvgaImageSize.target(imageUsage, opts.outWidth, opts.outHeight, viewportScale)
+                val target = SvgaImageSize.target(imageUsage, opts.outWidth, opts.outHeight, viewportScale, decodeOptions.renderScale)
                 if (decodeOptions.inBitmap && imageUsage?.visibleUseCount == 1) {
                     video.deferredImageSources[key.removeSuffix(".matte")] = SvgaDeferredImage(
                         file?.readBytes() ?: requireNotNull(bytes), checkNotNull(imageUsage.singleUseFrame),

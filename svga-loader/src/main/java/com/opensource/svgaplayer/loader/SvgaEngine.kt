@@ -101,12 +101,13 @@ class SvgaEngine(
     private fun decodeSnapshot(request: SvgaRequest): SvgaRequest {
         val r = request.snapshot()
         val options = r.resolveDecodeOptions()
-        return r.copy(bitmapConfig = options.bitmapConfig, skipInvisibleImages = options.skipInvisibleImages)
+        return r.copy(bitmapConfig = options.bitmapConfig, skipInvisibleImages = options.skipInvisibleImages,
+            renderScale = options.renderScale)
     }
 
     private fun decodeKey(r: SvgaRequest): String {
         val options = r.resolveDecodeOptions()
-        return "${r.width}:${r.height}:${options.bitmapConfig.name}:${options.skipInvisibleImages}:${options.inBitmap}:${options.progressive}"
+        return "${r.width}:${r.height}:${options.bitmapConfig.name}:${options.skipInvisibleImages}:${options.inBitmap}:${options.progressive}:${options.renderScale}"
     }
 
     private suspend fun <T> useSource(r: SvgaRequest, onProgress: (suspend (SvgaDownloadProgress) -> Unit)?,

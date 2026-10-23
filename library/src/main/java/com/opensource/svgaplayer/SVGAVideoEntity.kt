@@ -332,9 +332,11 @@ class SVGAVideoEntity {
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         val viewportScale = if (mFrameWidth > 0 && mFrameHeight > 0)
             maxOf(mFrameWidth / videoSize.width, mFrameHeight / videoSize.height) else Double.NaN
-        val target = SvgaImageSize.target(imageUsage[key.removeSuffix(".matte")], bounds.outWidth, bounds.outHeight, viewportScale)
+        val options = checkNotNull(activeDecodeOptions)
+        val target = SvgaImageSize.target(imageUsage[key.removeSuffix(".matte")], bounds.outWidth, bounds.outHeight,
+            viewportScale, options.renderScale)
         return SvgaImageDecoder.decode(file, bytes, bounds.outWidth, bounds.outHeight, target.first, target.second,
-            checkNotNull(activeDecodeOptions))
+            options)
     }
 
     private fun resetSprites(json: JSONObject) {

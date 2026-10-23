@@ -4,6 +4,27 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SvgaImageSizeTest {
+    @Test fun renderScaleMultipliesExistingTargetsAfterSizingAndSourceCap() {
+        val usage = SvgaImageSize().apply { include(1200.0, 600.0, .5, 0.0, 0.0, .5) }
+        assertEquals(300 to 150, SvgaImageSize.target(usage, 1000, 500, .5, 1f))
+        assertEquals(150 to 75, SvgaImageSize.target(usage, 1000, 500, .5, .5f))
+        // An oversized viewport still scales down the capped source dimensions.
+        assertEquals(500 to 250, SvgaImageSize.target(usage, 1000, 500, 100.0, .5f))
+        assertEquals(500 to 250, SvgaImageSize.target(usage, 1000, 500, Double.NaN, .5f))
+        assertEquals(250 to 125, SvgaImageSize.target(null, 1000, 500, .5, .5f))
+        usage.include(1.0, 1.0, Double.NaN, 0.0, 0.0, 1.0)
+        assertEquals(500 to 250, SvgaImageSize.target(usage, 1000, 500, 1.0, .5f))
+    }
+
+    @Test fun renderScaleRoundsEachExistingDimensionAndKeepsAtLeastOnePixel() {
+        val usage = SvgaImageSize().apply { include(100.1, 20.0, 1.0, 0.0, 0.0, 1.0) }
+        assertEquals(51 to 26, SvgaImageSize.target(usage, 200, 100, 1.0, .5f))
+        assertEquals(1 to 1, SvgaImageSize.target(usage, 200, 100, 1.0, Float.MIN_VALUE))
+        assertEquals(1 to 1, SvgaImageSize.target(null, 1, 1, Double.NaN, .5f))
+        assertEquals(20 to 10, SvgaImageSize.target(null, 200, 100, Double.NaN, .1f))
+        assertEquals(60 to 30, SvgaImageSize.target(null, 200, 100, Double.NaN, .3f))
+    }
+
     @Test fun displayedRegionMergesUsesRoundsUpAndIgnoresHiddenExpansion() {
         val usage = SvgaImageSize()
         usage.include(1000.0, 1000.0, 1.0, 0.0, 0.0, 1.0, visible = false)
