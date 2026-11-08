@@ -11,6 +11,7 @@ import okhttp3.*
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -39,7 +40,8 @@ class SvgaEngine(
     private val downloads = Semaphore(downloadConcurrency)
     private val preDownloads = Semaphore(preDownloadConcurrency)
     private val decodes = Semaphore(decodeConcurrency)
-    private data class Source(val file: File, val digest: String, val reusable: Boolean, val temporary: Boolean,
+    private data class Source(val open: () -> InputStream, val version: String, val reusable: Boolean,
+        val dispose: () -> Unit = {},
         val expiresAt: Long = Long.MAX_VALUE, val publish: suspend (Boolean) -> Unit = {},
         val reject: suspend () -> Unit = {})
     private class SourceRejections {
@@ -47,7 +49,7 @@ class SvgaEngine(
         val digests = HashSet<String>() // Guarded by diskMutex.
     }
     private val sourceRejections = HashMap<String, SourceRejections>()
-    private val sources = SharedFlights<String, Source>(scope) { if (it.temporary) it.file.delete() }
+    private val sources = SharedFlights<String, Source>(scope) { it.dispose() }
     private val resources = SharedFlights<String, SvgaResource>(scope)
     private val memory = ResourceMemoryCache<SvgaResource>(memoryBytes, { !it.hasImageDecodeError }) { it.sizeBytes }
     val weakMemoryHits = AtomicLong()
@@ -135,7 +137,7 @@ class SvgaEngine(
         val decodeOptions = r.resolveDecodeOptions()
         val decodeKey = decodeKey(r)
         val identity = sourceIdentity(r)
-        val digest = source.digest
+        val digest = source.version
         val lookupKey = "$identity:$decodeKey"
         val weakEnabled = weakMemoryCacheEnabled && r.usesWeakMemory
         return withContext(Dispatchers.IO) {
@@ -149,10 +151,10 @@ class SvgaEngine(
             } else {
                 resources.use("$key:${sourceKey(r)}", {
                     decodes.withPermit {
-                        val dir = File(staging, java.util.UUID.randomUUID().toString()).apply { mkdirs() }
+                        val dir = File(staging, java.util.UUID.randomUUID().toString()).apply { ensureSvgaDirectory(this) }
                         try {
                             decodeCount.incrementAndGet()
-                            val resource = source.file.inputStream().use {
+                            val resource = source.open().use {
                                 SvgaResource.decode(it, dir, r.width, r.height, maxDecodedBytes, decodeOptions) {
                                     // Retain only body identity, not requests and their UI callbacks.
                                     memory.invalidate("$identity:$digest:")
@@ -183,7 +185,11 @@ class SvgaEngine(
 
     suspend fun preload(request: SvgaRequest) { acquire(request) }
     fun clearMemory() = memory.clear()
-    override fun close() { scope.cancel(); clearMemory() }
+    val isClosed: Boolean get() = !scope.isActive
+    override fun close() {
+        scope.cancel(); clearMemory()
+        synchronized(Companion) { if (shared === this) shared = null }
+    }
 
     private fun sourceIdentity(r: SvgaRequest): String {
         val identity = when (val source = r.source) {
@@ -198,11 +204,21 @@ class SvgaEngine(
     private suspend fun source(r: SvgaRequest, progress: (SvgaDownloadProgress) -> Unit,
         rejections: SourceRejections): Source {
         when (val source = r.source) {
-            is SvgaSource.LocalFile -> return Source(source.file, digest(source.file), true, false)
+            is SvgaSource.LocalFile -> return Source(source.file::inputStream, digest(source.file), true)
             is SvgaSource.Asset -> {
-                val file = File.createTempFile("asset", ".svga", staging)
-                try { context.assets.open(source.path).use { copy(it, file) }; return Source(file, digest(file), true, true) }
-                catch (e: Throwable) { file.delete(); throw e }
+                // Packaged assets are fixed for this engine and sourceIdentity already includes the path.
+                // Use that identity so decoding does not require a preliminary content-hash scan.
+                val open = { openAsset(source.path) }
+                val validation = Mutex()
+                var validated = false
+                return Source(open, "asset", true, publish = { parsed ->
+                    // Download-only callers still validate existence, input size and cancellation.
+                    // Overlapping subscribers validate once, or reuse a successful decode.
+                    validation.withLock {
+                        if (!parsed && !validated) open().use { validateAsset(it) }
+                        validated = true
+                    }
+                })
             }
             is SvgaSource.Remote -> return remote(r, source, progress, rejections)
         }
@@ -219,7 +235,7 @@ class SvgaEngine(
             if (r.readsDisk && data.isFile && metaFile.isFile) {
                 val metadata = runCatching { JSONObject(metaFile.readText()) }.getOrNull()
                 if (metadata != null) {
-                    val snapshot = File.createTempFile("cached", ".svga", staging)
+                    val snapshot = createTemporarySvgaFile("cached", staging)
                     try { data.inputStream().use { copy(it, snapshot) }; cached = snapshot }
                     catch (e: Throwable) { snapshot.delete(); throw e }
                 }
@@ -269,7 +285,7 @@ class SvgaEngine(
                     if (r.writesDisk) diskMutex.withLock { entry.deleteRecursively() }
                     memory.invalidate(key + ":")
                 }
-                return if (noStore) Source(temp, digest, false, true, expiry)
+                return if (noStore) Source(temp::inputStream, digest, false, { temp.delete() }, expiry)
                 else diskSource(r, entry, temp, metadata, rejections, cached = false)
             } catch (e: Throwable) { temp.delete(); throw e }
         } catch (e: Exception) {
@@ -290,7 +306,7 @@ class SvgaEngine(
         var published = cached
         var publishedValidated = validated
         fun currentMetadata() = runCatching { JSONObject(File(entry, "metadata").readText()) }.getOrNull()
-        return Source(file, digest, true, true, expiresAt, publish = { parsed ->
+        return Source(file::inputStream, digest, true, { file.delete() }, expiresAt, publish = { parsed ->
             diskMutex.withLock {
                 val current = currentMetadata()
                 if (current?.optString("digest") == digest && current.optBoolean("validated", true)) validated = true
@@ -354,16 +370,40 @@ class SvgaEngine(
         currentCoroutineContext().ensureActive()
         progress?.invoke(SvgaDownloadProgress(size, totalBytes, completed = true))
     }
-    private suspend fun digest(file: File): String {
+    private suspend fun digest(file: File): String = file.inputStream().use { digest(it) }
+    private fun openAsset(path: String): InputStream {
+        val input = context.assets.open(path)
+        try {
+            // AssetInputStream exposes the packaged entry's length without reading its body.
+            require(input.available().toLong() <= SvgaResource.MAX_INPUT_BYTES) { "Input too large" }
+            return input
+        } catch (e: Throwable) { input.close(); throw e }
+    }
+    private suspend fun validateAsset(input: InputStream) {
+        val buffer = ByteArray(8192)
+        var size = 0L
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val n = input.read(buffer); if (n < 0) break
+            size += n; require(size <= SvgaResource.MAX_INPUT_BYTES) { "Input too large" }
+        }
+    }
+    private suspend fun digest(input: InputStream): String {
         val md = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input -> val buffer = ByteArray(8192)
-            while (true) { currentCoroutineContext().ensureActive(); val n = input.read(buffer); if (n < 0) break; md.update(buffer, 0, n) } }
+        val buffer = ByteArray(8192)
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val n = input.read(buffer); if (n < 0) break
+            md.update(buffer, 0, n)
+        }
         return md.digest().joinToString("") { "%02x".format(it) }
     }
     private fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
     companion object {
         private val diskMutex = Mutex()
         @Volatile private var shared: SvgaEngine? = null
-        fun get(context: Context): SvgaEngine = shared ?: synchronized(this) { shared ?: SvgaEngine(context).also { shared = it } }
+        fun get(context: Context): SvgaEngine = shared?.takeUnless { it.isClosed } ?: synchronized(this) {
+            shared?.takeUnless { it.isClosed } ?: SvgaEngine(context).also { shared = it }
+        }
     }
 }

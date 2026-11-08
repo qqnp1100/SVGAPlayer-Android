@@ -44,8 +44,8 @@ class SvgaImageLoader(context: Context, val engine: SvgaEngine = SvgaEngine.get(
 
     companion object {
         @Volatile private var shared: SvgaImageLoader? = null
-        fun get(context: Context): SvgaImageLoader = shared?.takeIf { it.lifetime.isActive } ?: synchronized(this) {
-            shared?.takeIf { it.lifetime.isActive } ?: SvgaImageLoader(context).also { shared = it }
+        fun get(context: Context): SvgaImageLoader = shared?.takeIf { it.lifetime.isActive && !it.engine.isClosed } ?: synchronized(this) {
+            shared?.takeIf { it.lifetime.isActive && !it.engine.isClosed } ?: SvgaImageLoader(context).also { shared = it }
         }
     }
 }

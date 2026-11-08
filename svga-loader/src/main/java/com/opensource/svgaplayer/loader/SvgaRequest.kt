@@ -1,6 +1,7 @@
 package com.opensource.svgaplayer.loader
 
 import android.graphics.Bitmap
+import android.net.Uri
 import com.opensource.svgaplayer.SvgaDecodeOptions
 import java.io.File
 import java.net.URI
@@ -15,7 +16,7 @@ sealed interface SvgaSource {
             is File -> LocalFile(value)
             is String -> when {
                 value.startsWith("https://") || value.startsWith("http://") -> Remote(value)
-                value.startsWith("file:///android_asset/") -> Asset(value.removePrefix("file:///android_asset/"))
+                value.startsWith("file:///android_asset/") -> Asset(requireNotNull(Uri.parse(value).path).removePrefix("/android_asset/"))
                 value.startsWith("file://") -> LocalFile(File(URI(value)))
                 else -> error("Use SvgaSource.Asset for asset paths, or File for local files")
             }

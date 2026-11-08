@@ -131,6 +131,10 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                 val imageUsage = usage[key.removeSuffix(".matte")]
                 if ((decodeOptions.skipInvisibleImages || decodeOptions.inBitmap) && imageUsage?.hasVisibleFrame != true) continue
                 val bytes = images[key]?.toByteArray()
+                // Older exports can contain ID3 audio in images without an audios entry.
+                if (bytes != null && bytes.size >= 10 && bytes[0] == 0x49.toByte() &&
+                    bytes[1] == 0x44.toByte() && bytes[2] == 0x33.toByte() &&
+                    bytes[3].toInt() in 2..4 && (6..9).all { bytes[it] >= 0 }) continue
                 fun imageFile(name: String): File {
                     val file = listOf(name, "$name.png", "$key.png").map { File(directory, it).canonicalFile }
                         .firstOrNull { it.path.startsWith(directory.canonicalPath + File.separator) && it.isFile }

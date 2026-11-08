@@ -29,6 +29,7 @@ class SvgaFetcher private constructor(private val engine: SvgaEngine, private va
 
 /** Own ImageLoader; does not replace the host application's Coil singleton. */
 class SvgaImageLoader(context: Context, val engine: SvgaEngine = SvgaEngine.get(context)) : AutoCloseable {
+    @Volatile private var closed = false
     private val context = context.applicationContext
     val imageLoader = ImageLoader.Builder(this.context).components { add(SvgaFetcher.Factory(engine)) }.build()
     suspend fun load(request: SvgaRequest, onDownloadProgress: (suspend (SvgaDownloadProgress) -> Unit)? = request.onDownloadProgress): SvgaResource {
@@ -46,11 +47,11 @@ class SvgaImageLoader(context: Context, val engine: SvgaEngine = SvgaEngine.get(
     suspend fun preDownload(request: SvgaRequest, parseAfterDownload: Boolean = false,
         onDownloadProgress: (suspend (SvgaDownloadProgress) -> Unit)? = request.onDownloadProgress) =
         engine.preDownload(request, parseAfterDownload, onDownloadProgress)
-    override fun close() = imageLoader.shutdown()
+    override fun close() { closed = true; imageLoader.shutdown() }
     companion object {
         @Volatile private var shared: SvgaImageLoader? = null
-        fun get(context: Context): SvgaImageLoader = shared ?: synchronized(this) {
-            shared ?: SvgaImageLoader(context).also { shared = it }
+        fun get(context: Context): SvgaImageLoader = shared?.takeUnless { it.closed || it.engine.isClosed } ?: synchronized(this) {
+            shared?.takeUnless { it.closed || it.engine.isClosed } ?: SvgaImageLoader(context).also { shared = it }
         }
     }
 }

@@ -230,7 +230,9 @@ val request = SvgaRequest(
 
 `memoryRead` / `memoryWrite` 分别覆盖强引用 LRU 的读写，`diskRead` / `diskWrite` 分别覆盖磁盘读写；弱引用索引由独立的 `weakMemoryCache` 控制。`cacheOnly` 禁止网络，可读取已有缓存；`refresh` 绕过内存快速命中并重新获取来源；`allowStaleOnError` 显式允许网络失败时使用已有磁盘正文，默认关闭。
 
-请求头快照、完整 URL、版本、namespace 纳入来源身份；文件使用规范路径、长度和修改时间。内容 SHA-256 和解码规格区分资源缓存。HTTP 使用 Cache-Control、ETag、Last-Modified、Expires 和 Age，过期条件验证；no-store 不写可复用缓存。没有新鲜度的 HTTP 响应不会无限从内存返回。NONE 允许解压/音频所需临时文件，不持久复用。
+请求头快照、完整 URL、版本、namespace 纳入来源身份；文件使用规范路径、长度和修改时间。本地文件和网络正文的内容 SHA-256 与解码规格区分资源缓存。HTTP 使用 Cache-Control、ETag、Last-Modified、Expires 和 Age，过期条件验证；no-store 不写可复用缓存。没有新鲜度的 HTTP 响应不会无限从内存返回。NONE 允许解压/音频所需临时文件，不持久复用。
+
+Assets 按同一引擎内固定的包内路径建立缓存身份，不预先扫描正文计算摘要。每个冷解码任务只打开并读取一次 Asset，强缓存或弱缓存命中时不打开文件；相同解码规格的兼容并发请求共享一次读取和解码。Assets 不额外持久化源文件；ZIP 解压仍使用临时目录。`preDownload` 不解析 Assets 时仍会流式校验文件是否可读及输入大小，不写入解码资源缓存。
 
 引擎默认内存 32 MiB、磁盘 128 MiB、下载并发 4、解码并发 2、单次解码像素预算 128 MiB；可在构造时修改。内存计费包含实际 Bitmap 分配量、音频字节及帧对象估算。提供 `clearMemory()`、挂起的 `clearDisk()`、`preload(request)`（准备完整资源）和诊断计数器。
 

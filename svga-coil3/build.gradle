@@ -16,6 +16,7 @@ dependencies {
     implementation 'androidx.exifinterface:exifinterface:1.4.1'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.15.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }

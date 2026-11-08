@@ -94,7 +94,7 @@ internal class ResumableDownload(
                         val etag = strongEtag(res.header("ETag"))
                         val keep = maySave && !noStore && identityEncoding(raw) && etag != null &&
                             (total == null || total <= minOf(budget, SvgaResource.MAX_INPUT_BYTES)) && raw.code != 304
-                        val temp = File.createTempFile("download", ".svga", staging)
+                        val temp = createTemporarySvgaFile("download", staging)
                         var target = temp
                         try {
                             if (append && !keep) bodyFile.copyTo(temp, overwrite = true)
