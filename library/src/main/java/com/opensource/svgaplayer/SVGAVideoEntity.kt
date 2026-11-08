@@ -1,23 +1,37 @@
 package com.opensource.svgaplayer
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
 import android.os.Build
+import android.util.Log
+import android.util.Size
+import android.view.View
+import android.widget.ImageView
 import com.opensource.svgaplayer.entities.SVGAAudioEntity
 import com.opensource.svgaplayer.entities.SVGAVideoSpriteEntity
+import com.opensource.svgaplayer.entities.SvgaFramePool
+import com.opensource.svgaplayer.bitmap.SvgaImageDecoder
+import com.opensource.svgaplayer.bitmap.SvgaImageSize
 import com.opensource.svgaplayer.proto.AudioEntity
 import com.opensource.svgaplayer.proto.MovieEntity
 import com.opensource.svgaplayer.proto.MovieParams
 import com.opensource.svgaplayer.utils.SVGARect
 import com.opensource.svgaplayer.utils.log.LogUtils
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import org.json.JSONObject
+import java.io.Closeable
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.*
+import kotlin.coroutines.CoroutineContext
 
 /**
  * Created by PonyCui on 16/6/18.
@@ -26,8 +40,14 @@ class SVGAVideoEntity {
 
     private val TAG = "SVGAVideoEntity"
 
+    internal var resource: SvgaResource? = null
+
     var antiAlias = true
     var movieItem: MovieEntity? = null
+    /** Legacy Parser: set before attaching to a View. Null inherits global defaults when images load. */
+    var decodeOptions: SvgaDecodeOptions? = null
+    private var activeDecodeOptions: SvgaDecodeOptions? = null
+    private var imageUsage: Map<String, SvgaImageSize> = emptyMap()
 
     var videoSize = SVGARect(0.0, 0.0, 0.0, 0.0)
         private set
@@ -40,18 +60,53 @@ class SVGAVideoEntity {
 
     internal var scaleMap = HashMap<String, Pair<Float, Float>>()
     internal var spriteList: List<SVGAVideoSpriteEntity> = emptyList()
+    internal var frameStorageBytes = 0L
+        private set
     internal var audioList: List<SVGAAudioEntity> = emptyList()
     internal var soundPool: SoundPool? = null
     private var soundCallback: SVGASoundManager.SVGASoundCallBack? = null
     internal var imageMap = HashMap<String, Bitmap>()
+    internal val deferredImageSources = HashMap<String, SvgaDeferredImage>()
+    internal var deferredImageBudget = 0L
+    internal var deferredImages: SvgaDeferredImages? = null
+    internal var sharedImages: SvgaSharedImages? = null
     private var mCacheDir: File
     private var mFrameHeight = 0
     private var mFrameWidth = 0
     private var mPlayCallback: SVGAParser.PlayCallback? = null
     private lateinit var mCallback: () -> Unit
+    private var imageJson: JSONObject? = null
+    @Volatile private var isClean = false
+    @Volatile
+    private var expectedAudioLoadCount = 0
+    @Volatile
+    private var audioPrepareCompleted = false
 
+    private var isParser = false
+    private var sharesResources = false
+
+    /** A presentation owns its maps and audio state, but borrows immutable frames/bitmaps. */
+    internal constructor(resource: SVGAVideoEntity) {
+        mCacheDir = resource.mCacheDir
+        videoSize = resource.videoSize
+        FPS = resource.FPS
+        frames = resource.frames
+        spriteList = resource.spriteList
+        frameStorageBytes = resource.frameStorageBytes
+        imageMap.putAll(resource.imageMap)
+        sharedImages = resource.sharedImages
+        if (resource.deferredImageSources.isNotEmpty() || sharedImages != null) {
+            deferredImages = SvgaDeferredImages(resource.deferredImageSources.toMap(), resource.deferredImageBudget, sharedImages)
+        }
+        scaleMap.putAll(resource.scaleMap)
+        isParser = true
+        sharesResources = true
+    }
+
+    @Deprecated("Deprecated since 3.0.0. Load or decode a SvgaResource, then call newVideoEntity for a presentation.")
     constructor(json: JSONObject, cacheDir: File) : this(json, cacheDir, 0, 0)
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaResource.decode or SvgaRequest.width/height, then resource.newVideoEntity.")
     constructor(json: JSONObject, cacheDir: File, frameWidth: Int, frameHeight: Int) {
         mFrameWidth = frameWidth
         mFrameHeight = frameHeight
@@ -59,13 +114,7 @@ class SVGAVideoEntity {
         val movieJsonObject = json.optJSONObject("movie") ?: return
         setupByJson(movieJsonObject)
         resetSprites(json)
-        try {
-            parserImages(json)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        } catch (e: OutOfMemoryError) {
-            e.printStackTrace()
-        }
+        imageJson = json.optJSONObject("images")
     }
 
     private fun setupByJson(movieObject: JSONObject) {
@@ -78,8 +127,10 @@ class SVGAVideoEntity {
         frames = movieObject.optInt("frames", 0)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Load or decode a SvgaResource, then call newVideoEntity for a presentation.")
     constructor(entity: MovieEntity, cacheDir: File) : this(entity, cacheDir, 0, 0)
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaResource.decode or SvgaRequest.width/height, then resource.newVideoEntity.")
     constructor(entity: MovieEntity, cacheDir: File, frameWidth: Int, frameHeight: Int) {
         this.mFrameWidth = frameWidth
         this.mFrameHeight = frameHeight
@@ -87,12 +138,44 @@ class SVGAVideoEntity {
         this.movieItem = entity
         entity.params?.let(this::setupByMovie)
         resetSprites(entity)
-        try {
-            parserImages(entity)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        } catch (e: OutOfMemoryError) {
-            e.printStackTrace()
+    }
+
+    public fun getImageSizeByKey(key: String): Size? {
+        val bitmap = imageMap[key] ?: return deferredImages?.size(key)
+        return Size(bitmap.width, bitmap.height)
+    }
+
+    internal fun bitmap(key: String): Bitmap? = imageMap[key] ?: deferredImages?.bitmap(key)
+
+    @Deprecated("Deprecated since 3.0.0. Modern loaders prepare resource images on worker threads.")
+    public suspend fun parserImages(view: View) {
+        synchronized(imageMap) {
+            if (isParser || isClean) return
+            activeDecodeOptions = decodeOptions ?: SvgaDecodeOptions.defaults
+            isParser = true
+        }
+        val usage = imageUsage()
+        synchronized(imageMap) {
+            if (isClean) return
+            imageUsage = usage
+        }
+        movieItem?.let {
+            try {
+                parserImages(view, it)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } catch (e: OutOfMemoryError) {
+                e.printStackTrace()
+            }
+        }
+        imageJson?.let {
+            try {
+                parserImages(view, it)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } catch (e: OutOfMemoryError) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -107,6 +190,8 @@ class SVGAVideoEntity {
     internal fun prepare(callback: () -> Unit, playCallback: SVGAParser.PlayCallback?) {
         mCallback = callback
         mPlayCallback = playCallback
+        expectedAudioLoadCount = 0
+        audioPrepareCompleted = false
         if (movieItem == null) {
             mCallback()
         } else {
@@ -116,18 +201,58 @@ class SVGAVideoEntity {
         }
     }
 
-    private fun parserImages(json: JSONObject) {
-        val imgJson = json.optJSONObject("images") ?: return
+    private fun parserImages(imageView: View, imgJson: JSONObject) {
         imgJson.keys().forEach { imgKey ->
+            if (isClean) {
+                return
+            }
+            if (activeDecodeOptions?.skipInvisibleImages == true && imageUsage[imgKey.removeSuffix(".matte")]?.hasVisibleFrame != true) return@forEach
             val filePath = generateBitmapFilePath(imgJson[imgKey].toString(), imgKey)
             if (filePath.isEmpty()) {
                 return
             }
-            val bitmapKey = imgKey.replace(".matte", "")
+            val bitmapKey = imgKey.removeSuffix(".matte")
             val maxScale = scaleMap[imgKey] ?: Pair(1f, 1f)
-            val bitmap = createBitmap(filePath, maxScale.first, maxScale.second)
-            if (bitmap != null) {
-                imageMap[bitmapKey] = bitmap
+            var lastBitmap: Bitmap? = null
+            synchronized(imageMap) {
+                lastBitmap = imageMap[bitmapKey]
+            }
+            if (lastBitmap == null || lastBitmap.isRecycled) {
+                val bitmap = createBitmap(imageView, filePath, maxScale.first, maxScale.second, imgKey)
+                if (bitmap != null) acceptBitmap(bitmapKey, bitmap)
+            }
+        }
+    }
+
+    private fun parserImages(view: View, obj: MovieEntity) {
+        obj.images?.entries?.forEach { entry ->
+            if (isClean) {
+                return
+            }
+            if (activeDecodeOptions?.skipInvisibleImages == true && imageUsage[entry.key.removeSuffix(".matte")]?.hasVisibleFrame != true) return@forEach
+            val byteArray = entry.value.toByteArray()
+            if (byteArray.count() < 4) {
+                return@forEach
+            }
+            val fileTag = byteArray.slice(IntRange(0, 3))
+            if (fileTag[0].toInt() == 73 && fileTag[1].toInt() == 68 && fileTag[2].toInt() == 51) {
+                return@forEach
+            }
+            val maxScale = scaleMap[entry.key] ?: Pair(1f, 1f)
+            var lastBitmap: Bitmap? = null
+            synchronized(imageMap) {
+                lastBitmap = imageMap[entry.key]
+            }
+            if (lastBitmap == null || lastBitmap.isRecycled) {
+                createBitmap(
+                    view,
+                    byteArray,
+                    entry.key,
+                    maxScale.first,
+                    maxScale.second
+                )?.let { bitmap ->
+                    acceptBitmap(entry.key, bitmap)
+                }
             }
         }
     }
@@ -145,8 +270,26 @@ class SVGAVideoEntity {
         }
     }
 
-    private fun createBitmap(filePath: String, scaleX: Float, scaleY: Float): Bitmap? {
+    /** Clear and publication share a lock, including results decoded before cancellation. */
+    private fun acceptBitmap(key: String, bitmap: Bitmap) {
+        synchronized(imageMap) {
+            if (isClean) SVGAParser.getBitmapDecoder().onClean(bitmap)
+            else imageMap.put(key, bitmap)?.takeIf { it !== bitmap }?.let {
+                SVGAParser.getBitmapDecoder().onClean(it)
+            }
+        }
+    }
+
+    private fun createBitmap(
+        imageView: View,
+        filePath: String,
+        scaleX: Float,
+        scaleY: Float,
+        imgKey: String,
+    ): Bitmap? {
+        if (SVGAParser.usesDefaultBitmapDecoder()) return decodeBaseImage(File(filePath), null, imgKey)
         return SVGAParser.getBitmapDecoder().onLoad(
+            imageView,
             filePath,
             scaleX,
             scaleY,
@@ -157,31 +300,16 @@ class SVGAVideoEntity {
         )
     }
 
-    private fun parserImages(obj: MovieEntity) {
-        obj.images?.entries?.forEach { entry ->
-            val byteArray = entry.value.toByteArray()
-            if (byteArray.count() < 4) {
-                return@forEach
-            }
-            val fileTag = byteArray.slice(IntRange(0, 3))
-            if (fileTag[0].toInt() == 73 && fileTag[1].toInt() == 68 && fileTag[2].toInt() == 51) {
-                return@forEach
-            }
-            val maxScale = scaleMap[entry.key] ?: Pair(1f, 1f)
-            createBitmap(byteArray, entry.key, maxScale.first, maxScale.second)?.let { bitmap ->
-                imageMap[entry.key] = bitmap
-            }
-        }
-    }
-
     private fun createBitmap(
+        imageView: View,
         byteArray: ByteArray,
         imgKey: String,
         scaleX: Float,
-        scaleY: Float
+        scaleY: Float,
     ): Bitmap? {
-        val bitmap =
-            SVGAParser.getBitmapDecoder().onLoad(
+        val bitmap = if (SVGAParser.usesDefaultBitmapDecoder()) decodeBaseImage(null, byteArray, imgKey)
+            else SVGAParser.getBitmapDecoder().onLoad(
+                imageView,
                 byteArray,
                 scaleX,
                 scaleY,
@@ -194,22 +322,37 @@ class SVGAVideoEntity {
             return bitmap
         }
         val filePath = generateBitmapFilePath(String(byteArray, Charsets.UTF_8), imgKey)
-        return createBitmap(filePath, scaleX, scaleY)
+        return createBitmap(imageView, filePath, scaleX, scaleY, imgKey)
+    }
+
+    private fun decodeBaseImage(file: File?, bytes: ByteArray?, key: String): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        if (file != null) BitmapFactory.decodeFile(file.path, bounds)
+        else bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val viewportScale = if (mFrameWidth > 0 && mFrameHeight > 0)
+            maxOf(mFrameWidth / videoSize.width, mFrameHeight / videoSize.height) else Double.NaN
+        val options = checkNotNull(activeDecodeOptions)
+        val target = SvgaImageSize.target(imageUsage[key.removeSuffix(".matte")], bounds.outWidth, bounds.outHeight,
+            viewportScale, options.renderScale)
+        return SvgaImageDecoder.decode(file, bytes, bounds.outWidth, bounds.outHeight, target.first, target.second,
+            options)
     }
 
     private fun resetSprites(json: JSONObject) {
+        val pool = SvgaFramePool()
         val mutableList: MutableList<SVGAVideoSpriteEntity> = mutableListOf()
         json.optJSONArray("sprites")?.let { item ->
             for (i in 0 until item.length()) {
                 item.optJSONObject(i)?.let { entryJson ->
-                    val entity = SVGAVideoSpriteEntity(entryJson)
+                    val entity = SVGAVideoSpriteEntity(entryJson, pool)
                     var matrixMaxScaleX = 1f
                     var matrixMaxScaleY = 1f
-                    entity.frames.map { e ->
-                        val f = FloatArray(9)
+                    val f = FloatArray(9)
+                    entity.frames.forEach { e ->
                         e.transform.getValues(f)
-                        val scaleX = f[Matrix.MSCALE_X]
-                        val scaleY = f[Matrix.MSCALE_Y]
+                        val scaleX = kotlin.math.hypot(f[Matrix.MSCALE_X], f[Matrix.MSKEW_Y])
+                        val scaleY = kotlin.math.hypot(f[Matrix.MSKEW_X], f[Matrix.MSCALE_Y])
                         if (scaleX > matrixMaxScaleX) {
                             matrixMaxScaleX = scaleX
                         }
@@ -223,18 +366,20 @@ class SVGAVideoEntity {
             }
         }
         spriteList = mutableList.toList()
+        frameStorageBytes = pool.estimatedBytes(spriteList.sumOf { it.frames.size.toLong() })
     }
 
     private fun resetSprites(entity: MovieEntity) {
+        val pool = SvgaFramePool()
         spriteList = entity.sprites?.map {
             var matrixMaxScaleX = 1f
             var matrixMaxScaleY = 1f
-            val entity = SVGAVideoSpriteEntity(it)
-            entity.frames.map { e ->
-                val f = FloatArray(9)
+            val entity = SVGAVideoSpriteEntity(it, pool)
+            val f = FloatArray(9)
+            entity.frames.forEach { e ->
                 e.transform.getValues(f)
-                val scaleX = f[Matrix.MSCALE_X]
-                val scaleY = f[Matrix.MSCALE_Y]
+                val scaleX = kotlin.math.hypot(f[Matrix.MSCALE_X], f[Matrix.MSKEW_Y])
+                val scaleY = kotlin.math.hypot(f[Matrix.MSKEW_X], f[Matrix.MSCALE_Y])
                 if (scaleX > matrixMaxScaleX) {
                     matrixMaxScaleX = scaleX
                 }
@@ -245,29 +390,38 @@ class SVGAVideoEntity {
             scaleMap[entity.imageKey ?: ""] = Pair(matrixMaxScaleX, matrixMaxScaleY)
             return@map entity
         } ?: listOf()
+        frameStorageBytes = pool.estimatedBytes(spriteList.sumOf { it.frames.size.toLong() })
     }
 
     private fun setupAudios(entity: MovieEntity, completionBlock: () -> Unit) {
         if (entity.audios == null || entity.audios.isEmpty()) {
-            run(completionBlock)
+            completeAudioPrepare(completionBlock)
             return
         }
-        setupSoundPool(entity, completionBlock)
         val audiosFileMap = generateAudioFileMap(entity)
         //repair when audioEntity error can not callback
         //如果audiosFileMap为空 soundPool?.load 不会走 导致 setOnLoadCompleteListener 不会回调 导致外层prepare不回调卡住
         if (audiosFileMap.size == 0) {
-            run(completionBlock)
+            completeAudioPrepare(completionBlock)
             return
         }
+        mPlayCallback?.let {
+            it.onPlay(audiosFileMap.values.toList())
+            completeAudioPrepare(completionBlock)
+            return
+        }
+        setupSoundPool(entity, completionBlock)
         this.audioList = entity.audios.map { audio ->
             return@map createSvgaAudioEntity(audio, audiosFileMap)
+        }
+        if (expectedAudioLoadCount == 0) {
+            completeAudioPrepare(completionBlock)
         }
     }
 
     private fun createSvgaAudioEntity(
         audio: AudioEntity,
-        audiosFileMap: HashMap<String, File>
+        audiosFileMap: HashMap<String, File>,
     ): SVGAAudioEntity {
         val item = SVGAAudioEntity(audio)
         val startTime = (audio.startTime ?: 0).toDouble()
@@ -276,17 +430,6 @@ class SVGAVideoEntity {
             // 除数不能为 0
             return item
         }
-        // 直接回调文件,后续播放都不走
-        mPlayCallback?.let {
-            val fileList: MutableList<File> = ArrayList()
-            audiosFileMap.forEach { entity ->
-                fileList.add(entity.value)
-            }
-            it.onPlay(fileList)
-            mCallback()
-            return item
-        }
-
         audiosFileMap[audio.audioKey]?.let { file ->
             FileInputStream(file).use {
                 val length = it.available().toDouble()
@@ -302,6 +445,9 @@ class SVGAVideoEntity {
                 } else {
                     item.soundID = soundPool?.load(it.fd, offset, length.toLong(), 1)
                 }
+                if ((item.soundID ?: -1) > 0) {
+                    expectedAudioLoadCount++
+                }
             }
         }
         return item
@@ -309,7 +455,9 @@ class SVGAVideoEntity {
 
     private fun generateAudioFile(audioCache: File, value: ByteArray): File {
         audioCache.createNewFile()
-        FileOutputStream(audioCache).write(value)
+        FileOutputStream(audioCache).use {
+            it.write(value)
+        }
         return audioCache
     }
 
@@ -330,21 +478,14 @@ class SVGAVideoEntity {
     }
 
     private fun generateAudioMap(entity: MovieEntity): HashMap<String, ByteArray> {
-        val audiosDataMap = HashMap<String, ByteArray>()
-        entity.images?.entries?.forEach {
-            val imageKey = it.key
-            val byteArray = it.value.toByteArray()
-            if (byteArray.count() < 4) {
-                return@forEach
-            }
-            val fileTag = byteArray.slice(IntRange(0, 3))
-            if (fileTag[0].toInt() == 73 && fileTag[1].toInt() == 68 && fileTag[2].toInt() == 51) {
-                audiosDataMap[imageKey] = byteArray
-            } else if (fileTag[0].toInt() == -1 && fileTag[1].toInt() == -5 && fileTag[2].toInt() == -108) {
-                audiosDataMap[imageKey] = byteArray
-            }
+        val result = HashMap<String, ByteArray>()
+        for ((key, bytes) in entity.images.orEmpty()) {
+            if (bytes.size < 3) continue
+            val id3 = bytes[0].toInt() == 73 && bytes[1].toInt() == 68 && bytes[2].toInt() == 51
+            val mp3 = bytes[0].toInt() == -1 && bytes[1].toInt() == -5 && bytes[2].toInt() == -108
+            if (id3 || mp3) result[key] = bytes.toByteArray()
         }
-        return audiosDataMap
+        return result
     }
 
     private fun setupSoundPool(entity: MovieEntity, completionBlock: () -> Unit) {
@@ -357,8 +498,8 @@ class SVGAVideoEntity {
 
                 override fun onComplete() {
                     soundLoaded++
-                    if (soundLoaded >= entity.audios.count()) {
-                        completionBlock()
+                    if (soundLoaded >= expectedAudioLoadCount) {
+                        completeAudioPrepare(completionBlock)
                     }
                 }
             }
@@ -369,10 +510,18 @@ class SVGAVideoEntity {
         soundPool?.setOnLoadCompleteListener { _, _, _ ->
             LogUtils.info("SVGAParser", "pool_complete")
             soundLoaded++
-            if (soundLoaded >= entity.audios.count()) {
-                completionBlock()
+            if (soundLoaded >= expectedAudioLoadCount) {
+                completeAudioPrepare(completionBlock)
             }
         }
+    }
+
+    private fun completeAudioPrepare(completionBlock: () -> Unit) {
+        if (audioPrepareCompleted) {
+            return
+        }
+        audioPrepareCompleted = true
+        completionBlock()
     }
 
     private fun generateSoundPool(entity: MovieEntity): SoundPool? {
@@ -394,14 +543,37 @@ class SVGAVideoEntity {
     }
 
     fun imageMapSize(): Int {
-        var total = 0
-        imageMap.map {
-            total += it.value.width * it.value.height * 4
+        var total = deferredImages?.allocationBytes ?: 0L
+        synchronized(imageMap) {
+            imageMap.map {
+                total += it.value.allocationByteCount
+            }
         }
-        return total
+        return total.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    fun isRecycleImage(): Boolean {
+        if (isClean) {
+            return true
+        }
+        synchronized(imageMap) {
+            for (mutableEntry in imageMap) {
+                if (mutableEntry.value.isRecycled) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     fun clear() {
+        synchronized(imageMap) { isClean = true }
+        deferredImages?.close(); deferredImages = null
+        sharedImages = null
+        deferredImageSources.clear()
+        resource = null
+        movieItem = null
+        imageJson = null
         if (SVGASoundManager.isInit()) {
             this.audioList.forEach {
                 it.soundID?.let { id -> SVGASoundManager.unload(id) }
@@ -411,15 +583,16 @@ class SVGAVideoEntity {
         soundPool?.release()
         soundPool = null
         audioList = emptyList()
-        spriteList.map {
-            it.clear()
-        }
+        if (!sharesResources) spriteList.forEach { it.clear() }
         spriteList = emptyList()
-        imageMap.map {
-            SVGAParser.getBitmapDecoder().onClean(it.value)
+        frameStorageBytes = 0L
+        synchronized(imageMap) {
+            if (!sharesResources) imageMap.forEach { SVGAParser.getBitmapDecoder().onClean(it.value) }
+            imageMap.clear()
+            imageUsage = emptyMap()
         }
-        imageMap.clear()
         scaleMap.clear()
+        isParser = false
     }
 }
 

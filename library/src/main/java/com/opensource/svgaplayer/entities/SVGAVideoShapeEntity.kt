@@ -14,7 +14,6 @@ import kotlin.collections.HashMap
  * Created by cuiminghui on 2017/2/22.
  */
 
-val sharedPath = Path()
 
 internal class SVGAVideoShapeEntity {
 
@@ -322,7 +321,7 @@ internal class SVGAVideoShapeEntity {
         if (this.shapePath != null) {
             return
         }
-        sharedPath.reset()
+        val sharedPath = Path()
         if (this.type == Type.shape) {
             (this.args?.get("d") as? String)?.let {
                 SVGAPathEntity(it).buildPath(sharedPath)
@@ -355,8 +354,7 @@ internal class SVGAVideoShapeEntity {
                 Path.Direction.CW
             )
         }
-        this.shapePath = Path()
-        this.shapePath?.set(sharedPath)
+        this.shapePath = sharedPath
     }
 
     fun clear() {

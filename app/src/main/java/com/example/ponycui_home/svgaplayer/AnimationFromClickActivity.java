@@ -2,16 +2,17 @@ package com.example.ponycui_home.svgaplayer;
 
 import android.graphics.Color;
 import android.os.Bundle;
+import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import android.widget.Toast;
 
 import com.opensource.svgaplayer.SVGAClickAreaListener;
 import com.opensource.svgaplayer.SVGADrawable;
-import com.opensource.svgaplayer.SVGADynamicEntity;
 import com.opensource.svgaplayer.SVGAImageView;
-import com.opensource.svgaplayer.SVGAParser;
-import com.opensource.svgaplayer.SVGAVideoEntity;
+import com.opensource.svgaplayer.coil3.SvgaViewLoaderKt;
+import com.opensource.svgaplayer.loader.SvgaSource;
+import kotlin.Unit;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -35,25 +36,23 @@ public class AnimationFromClickActivity extends AppCompatActivity {
             }
         });
         animationView.setBackgroundColor(Color.WHITE);
-        loadAnimation();
         setContentView(animationView);
+        loadAnimation();
     }
 
     private void loadAnimation() {
-        SVGAParser.Companion.shareParser().decodeFromAssets("MerryChristmas.svga",new SVGAParser.ParseCompletion() {
-            @Override
-            public void onComplete(@NotNull SVGAVideoEntity videoItem) {
-                SVGADynamicEntity dynamicEntity = new SVGADynamicEntity();
-                dynamicEntity.setClickArea("img_10");
-                SVGADrawable drawable = new SVGADrawable(videoItem, dynamicEntity);
-                animationView.setImageDrawable(drawable);
-                animationView.startAnimation();
-            }
-            @Override
-            public void onError() {
-
-            }
-        },null);
+        SvgaViewLoaderKt.loadSvga(animationView, new SvgaSource.Asset("MerryChristmas.svga"), options -> {
+            options.setOnReady(() -> {
+                SVGADrawable drawable = (SVGADrawable) animationView.getDrawable();
+                drawable.getDynamicItem().setClickArea("img_10");
+                return Unit.INSTANCE;
+            });
+            options.setOnError(error -> {
+                Log.e("SvgaClick", "Asset load failed", error);
+                return Unit.INSTANCE;
+            });
+            return Unit.INSTANCE;
+        });
     }
 
 }

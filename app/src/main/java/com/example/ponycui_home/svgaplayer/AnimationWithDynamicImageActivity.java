@@ -2,19 +2,14 @@ package com.example.ponycui_home.svgaplayer;
 
 import android.graphics.Color;
 import android.os.Bundle;
+import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.opensource.svgaplayer.SVGADrawable;
-import com.opensource.svgaplayer.SVGADynamicEntity;
 import com.opensource.svgaplayer.SVGAImageView;
-import com.opensource.svgaplayer.SVGAParser;
-import com.opensource.svgaplayer.SVGAVideoEntity;
-
-import org.jetbrains.annotations.NotNull;
-
-import java.net.MalformedURLException;
-import java.net.URL;
+import com.opensource.svgaplayer.coil3.SvgaBindings;
+import com.opensource.svgaplayer.coil3.SvgaViewLoaderKt;
+import kotlin.Unit;
 
 public class AnimationWithDynamicImageActivity extends AppCompatActivity {
 
@@ -25,31 +20,25 @@ public class AnimationWithDynamicImageActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         animationView = new SVGAImageView(this);
         animationView.setBackgroundColor(Color.GRAY);
-        loadAnimation();
         setContentView(animationView);
+        loadAnimation();
     }
 
     private void loadAnimation() {
-        try { // new URL needs try catch.
-            SVGAParser parser = new SVGAParser(this);
-            parser.decodeFromURL(new URL("https://github.com/yyued/SVGA-Samples/blob/master/kingset.svga?raw=true"), new SVGAParser.ParseCompletion() {
-                @Override
-                public void onComplete(@NotNull SVGAVideoEntity videoItem) {
-                    SVGADynamicEntity dynamicEntity = new SVGADynamicEntity();
-                    dynamicEntity.setDynamicImage("https://github.com/PonyCui/resources/blob/master/svga_replace_avatar.png?raw=true", "99"); // Here is the KEY implementation.
-                    SVGADrawable drawable = new SVGADrawable(videoItem, dynamicEntity);
-                    animationView.setImageDrawable(drawable);
-                    animationView.startAnimation();
-                }
-
-                @Override
-                public void onError() {
-
-                }
-            }, null);
-        } catch (MalformedURLException e) {
-            e.printStackTrace();
-        }
+        SvgaBindings.Builder bindings = new SvgaBindings.Builder();
+        bindings.image("99",
+                "https://github.com/PonyCui/resources/blob/master/svga_replace_avatar.png?raw=true",
+                0, true, false);
+        SvgaViewLoaderKt.loadSvga(animationView,
+                "https://github.com/yyued/SVGA-Samples/blob/master/kingset.svga?raw=true",
+                options -> {
+                    options.setBindings(bindings.build());
+                    options.setOnError(error -> {
+                        Log.e("SvgaDynamicImage", "Animation or dynamic image load failed", error);
+                        return Unit.INSTANCE;
+                    });
+                    return Unit.INSTANCE;
+                });
     }
 
 }

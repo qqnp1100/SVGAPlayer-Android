@@ -4,42 +4,197 @@ import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
+import android.os.SystemClock
 import android.widget.ImageView
 import com.opensource.svgaplayer.drawer.SVGACanvasDrawer
+import kotlinx.coroutines.*
 
-class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicEntity): Drawable() {
+class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicEntity) :
+    Drawable() {
 
-    constructor(videoItem: SVGAVideoEntity): this(videoItem, SVGADynamicEntity())
+    constructor(videoItem: SVGAVideoEntity) : this(videoItem, SVGADynamicEntity())
 
+    @Volatile
     var cleared = true
-        internal set (value) {
+        internal set(value) {
             if (field == value) {
                 return
             }
             field = value
+            if (value) {
+                textScrollTicker.stop()
+                drawer.pauseTextScrolling()
+            }
             invalidateSelf()
         }
 
     var currentFrame = 0
-        internal set (value) {
-            if (field == value) {
-                return
-            }
-            field = value
-            invalidateSelf()
-        }
+        private set
 
     var scaleType: ImageView.ScaleType = ImageView.ScaleType.MATRIX
 
     private val drawer = SVGACanvasDrawer(videoItem, dynamicItem)
+    @Volatile private var released = false
+    private var externalClock = false
+    private var presentationTimeNanos = 0L
+    private val frameScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var pendingFrame: Job? = null
+    private var drawnFrame = -1
 
-    override fun draw(canvas: Canvas) {
-        if (cleared) {
+    /** The modern adapter owns scheduling; scrolling text uses the same presentation timeline. */
+    fun advanceExternalClock(frame: Int, timeNanos: Long) {
+        externalClock = true
+        textScrollTicker.stop()
+        val changed = currentFrame != frame
+        updateCurrentFrame(frame, false)
+        presentationTimeNanos = timeNanos
+        videoItem.deferredImages?.let { it.request(frame); it.requestPrefetch() }
+        if (changed || drawer.hasActiveScrollingText) invalidateSelf()
+    }
+
+    /** Show the first frame without a playback or scrolling-text clock. */
+    fun showStaticFrame() {
+        advanceExternalClock(0, 0L)
+        cleared = false
+        setPlaybackActive(false)
+        invalidateSelf()
+    }
+
+    /** Prepare text/path caches on a worker before the first visible frame. */
+    fun prepare(width: Int, height: Int) {
+        if (!released) videoItem.deferredImages?.preparePlayback(currentFrame)
+        synchronized(drawer) {
+            if (released) return
+            val picture = android.graphics.Picture()
+            val canvas = picture.beginRecording(width, height)
+            val frame = currentFrame
+            val images = videoItem.deferredImages
+            images?.beginDraw(frame)
+            try { drawer.renderFrame(canvas, frame, scaleType, width, height, 0L) }
+            finally { picture.endRecording(); images?.endDraw(frame) }
+        }
+    }
+    /** Prepare only this frame's deferred pixels on the caller's worker thread. */
+    fun prepareFrame(frame: Int) { if (!released) videoItem.deferredImages?.prepare(frame) }
+    /** Configure only deferred presentations; eagerly decoded resources take no extra path. */
+    fun configureFramePrefetch(startFrame: Int, endFrame: Int, reverse: Boolean = false) {
+        if (!released) videoItem.deferredImages?.configurePrefetch(startFrame, endFrame, reverse)
+    }
+    /** Capture the request before dispatch so obsolete workers cannot undo a seek or replay. */
+    suspend fun awaitFrame(frame: Int) {
+        if (released) return
+        val images = videoItem.deferredImages ?: return
+        val ticket = images.request(frame)
+        withContext(Dispatchers.Default) { images.prepare(frame, ticket, coroutineContext) }
+        images.requestPrefetch()
+    }
+    fun isFrameReady(frame: Int): Boolean = !released && videoItem.deferredImages?.isReady(frame) != false
+    internal fun prepareAllImages() { if (!released) videoItem.deferredImages?.prepareAll() }
+    internal fun areAllImagesReady(): Boolean = videoItem.deferredImages?.allReady() != false
+    private var textScrollAttached = true
+    private var textScrollVisible = true
+    private val textScrollTicker = TextScrollTicker(
+        nowUptimeMillis = SystemClock::uptimeMillis,
+        schedule = { runnable, deadline -> scheduleSelf(runnable, deadline) },
+        unschedule = { runnable -> unscheduleSelf(runnable) },
+        invalidate = { invalidateSelf() },
+    )
+
+    fun updateCurrentFrame(frame: Int, invalidate: Boolean = true) {
+        if (currentFrame == frame) {
             return
         }
-        canvas?.let {
-            drawer.drawFrame(it,currentFrame, scaleType)
+        currentFrame = frame
+        if (invalidate) {
+            invalidateSelf()
         }
+    }
+
+    override fun draw(canvas: Canvas) {
+        // A hidden View must not wait for its initial worker preparation.
+        if (released || cleared) {
+            textScrollTicker.onDraw(false)
+            return
+        }
+        synchronized(drawer) {
+            if (released) return
+            drawLocked(canvas)
+        }
+    }
+
+    private fun drawLocked(canvas: Canvas) {
+        if (cleared) {
+            textScrollTicker.onDraw(false)
+            return
+        }
+        val frame = currentFrame
+        if (!isFrameReady(frame) && callback is android.view.View) {
+            // Covers a View drawing during initial preparation or direct Drawable frame updates.
+            if (pendingFrame?.isActive != true) pendingFrame = frameScope.launch {
+                try {
+                    awaitFrame(frame)
+                    ensureActive()
+                    invalidateSelf()
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    cleared = true
+                    android.util.Log.e("SVGADrawable", "Frame decode failed", e)
+                }
+            }
+            if (drawnFrame < 0 || !isFrameReady(drawnFrame)) return
+        } else prepareFrame(frame)
+        val displayFrame = if (isFrameReady(frame)) frame else drawnFrame
+        val images = videoItem.deferredImages
+        images?.beginDraw(displayFrame)
+        try {
+            if (externalClock) drawer.renderFrame(canvas, displayFrame, scaleType, canvas.width, canvas.height, presentationTimeNanos)
+            else {
+                drawer.drawFrame(canvas, displayFrame, scaleType)
+                textScrollTicker.onDraw(drawer.hasActiveScrollingText)
+            }
+            drawnFrame = displayFrame
+            images?.afterDraw(displayFrame, canvas, callback as? android.view.View)
+        } finally {
+            images?.endDraw(displayFrame)
+        }
+    }
+
+    internal fun setTextScrollEnabled(enabled: Boolean) {
+        drawer.pauseTextScrolling()
+        if (enabled && !cleared) {
+            textScrollTicker.setEnabled(true)
+        } else {
+            textScrollTicker.stop()
+        }
+    }
+
+    /** Used by external clocks to stop scrolling work while paused or off screen. */
+    fun setPlaybackActive(active: Boolean) {
+        if (externalClock) { if (!active) drawer.pauseTextScrolling() }
+        else setTextScrollEnabled(active)
+    }
+
+    internal fun setTextScrollAttached(attached: Boolean) {
+        textScrollAttached = attached
+        if (!attached) {
+            drawer.pauseTextScrolling()
+        }
+        updateTextScrollHostActive()
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun setVisible(visible: Boolean, restart: Boolean): Boolean {
+        val changed = super.setVisible(visible, restart)
+        textScrollVisible = visible
+        if (!visible) {
+            drawer.pauseTextScrolling()
+        }
+        updateTextScrollHostActive()
+        return changed
+    }
+
+    private fun updateTextScrollHostActive() {
+        textScrollTicker.setHostActive(textScrollAttached && textScrollVisible)
     }
 
     override fun setAlpha(alpha: Int) {
@@ -54,36 +209,39 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
 
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.resume or SvgaState.resume; custom renderers own a SvgaAudioSession.")
     fun resume() {
         videoItem.audioList.forEach { audio ->
             audio.playIDs?.map {
-                if (SVGASoundManager.isInit()){
+                if (SVGASoundManager.isInit()) {
                     SVGASoundManager.resume(it)
-                }else{
+                } else {
                     videoItem.soundPool?.resume(it)
                 }
             }
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.pause or SvgaState.pause; custom renderers own a SvgaAudioSession.")
     fun pause() {
         videoItem.audioList.forEach { audio ->
             audio.playIDs?.map {
-                if (SVGASoundManager.isInit()){
+                if (SVGASoundManager.isInit()) {
                     SVGASoundManager.pause(it)
-                }else{
+                } else {
                     videoItem.soundPool?.pause(it)
                 }
             }
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.cancel or clearSvga; custom renderers close their SvgaAudioSession.")
     fun stop() {
         videoItem.audioList.forEach { audio ->
             audio.playIDs?.map {
-                if (SVGASoundManager.isInit()){
+                if (SVGASoundManager.isInit()) {
                     SVGASoundManager.stop(it)
-                }else{
+                } else {
                     videoItem.soundPool?.stop(it)
                 }
             }
@@ -91,11 +249,24 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
     }
 
     fun clear() {
+        synchronized(drawer) {
+            if (released) return
+            released = true
+            cleared = true
+            clearLocked()
+        }
+    }
+
+    private fun clearLocked() {
+        frameScope.cancel()
+        textScrollTicker.stop()
+        drawer.pauseTextScrolling()
+        drawer.clearCaches()
         videoItem.audioList.forEach { audio ->
             audio.playIDs?.map {
-                if (SVGASoundManager.isInit()){
+                if (SVGASoundManager.isInit()) {
                     SVGASoundManager.stop(it)
-                }else{
+                } else {
                     videoItem.soundPool?.stop(it)
                 }
             }

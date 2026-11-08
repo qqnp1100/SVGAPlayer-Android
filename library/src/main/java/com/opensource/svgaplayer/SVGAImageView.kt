@@ -4,16 +4,32 @@ import android.animation.Animator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Rect
+import android.graphics.drawable.Drawable
 import android.os.Build
+import android.os.SystemClock
 import android.util.AttributeSet
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.animation.LinearInterpolator
 import androidx.appcompat.widget.AppCompatImageView
 import com.opensource.svgaplayer.utils.SVGARange
 import com.opensource.svgaplayer.utils.log.LogUtils
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.Closeable
 import java.lang.ref.WeakReference
 import java.net.URL
+import kotlin.coroutines.CoroutineContext
+
 
 /**
  * Created by PonyCui on 2017/3/29.
@@ -21,8 +37,8 @@ import java.net.URL
 open class SVGAImageView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-    defStyleAttr: Int = 0
-) : AppCompatImageView(context, attrs, defStyleAttr) {
+    defStyleAttr: Int = 0,
+) : AppCompatImageView(context, attrs, defStyleAttr), ViewTreeObserver.OnPreDrawListener {
 
     private val TAG = "SVGAImageView"
 
@@ -32,21 +48,26 @@ open class SVGAImageView @JvmOverloads constructor(
         Clear,
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaState.isPlaying in Compose; control View playback with SvgaViewHandle.")
     var isAnimating = false
-        private set
+        internal set
 
+    @Deprecated("Deprecated since 3.0.0. Set iterations in loadSvga or SvgaView; useViewControls retains this legacy setting.")
     var loops = 0
 
     @Deprecated(
-        "It is recommended to use clearAfterDetached, or manually call to SVGAVideoEntity#clear." +
-                "If you just consider cleaning up the canvas after playing, you can use FillMode#Clear.",
+        "Deprecated. Use clearSvga or SvgaViewHandle.cancel to cancel loading and clear playback.",
         level = DeprecationLevel.WARNING
     )
     var clearsAfterStop = false
+    @Deprecated("Deprecated since 3.0.0. loadSvga releases its presentation automatically on detach; use restartOnAttach to reload.")
     var clearsAfterDetached = false
+    @Deprecated("Deprecated since 3.0.0. Modern playback retains the final frame; use clearSvga to clear it or useViewControls for legacy fill modes.")
     var fillMode: FillMode = FillMode.Forward
+    @Deprecated("Deprecated since 3.0.0. Set onReady/onFinished/onError in loadSvga; use SvgaState for Compose playback state.")
     var callback: SVGACallback? = null
 
+    private var modernPlayback: SvgaLegacyViewSession? = null
     private var mAnimator: ValueAnimator? = null
     private var mItemClickAreaListener: SVGAClickAreaListener? = null
     private var mAntiAlias = true
@@ -60,6 +81,30 @@ open class SVGAImageView @JvmOverloads constructor(
         updateSvagDrawableCallBackWait = false
         getSVGADrawable()?.invalidateSelf()
     }
+
+    @Deprecated("Deprecated since 3.0.0. Set onReady in loadSvga or SvgaView to observe fully prepared resources.")
+    var parserImagesEndCallBack: (() -> Unit)? = null
+
+    internal class CloseableCoroutineScope(context: CoroutineContext) : Closeable, CoroutineScope {
+        override val coroutineContext: CoroutineContext = context
+
+        override fun close() {
+            coroutineContext.cancel()
+        }
+    }
+
+    private var scope: CloseableCoroutineScope? = null
+    private var imageLoadJob: Job? = null
+    private var imageLoadVersion = 0L
+    private var pendingLoadDrawable: SVGADrawable? = null
+    private var isStaticVideoItem = false
+    private var isViewVisible = true
+    private var isRectVisible = true
+    private var isAddOnPreDraw = false
+    @Deprecated("Deprecated since 3.0.0. Set hiddenBehavior in loadSvga or SvgaView.")
+    var pauseWhenHide = true
+    private val visibleRect = Rect()
+    private var lastRectVisibleCheckUptimeMillis = 0L
 
     init {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR2) {
@@ -99,6 +144,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     private fun parserSource(source: String) {
+        sourceLoader?.let { it(this, source, mAutoPlay); return }
         val refImgView = WeakReference<SVGAImageView>(this)
         val parser = SVGAParser(context)
         if (source.startsWith("http://") || source.startsWith("https://")) {
@@ -129,11 +175,14 @@ open class SVGAImageView @JvmOverloads constructor(
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use loadSvga autoPlay, or SvgaViewHandle.resume/replay.")
     fun startAnimation() {
         startAnimation(null, false)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Set startFrame/endFrame/reverse in loadSvga and control playback with SvgaViewHandle.")
     fun startAnimation(range: SVGARange?, reverse: Boolean = false) {
+        modernSession()?.let { it.start(range, reverse); return }
         stopAnimation(false)
         play(range, reverse)
     }
@@ -151,7 +200,7 @@ open class SVGAImageView @JvmOverloads constructor(
         val animator = ValueAnimator.ofInt(mStartFrame, mEndFrame)
         animator.interpolator = LinearInterpolator()
         animator.duration =
-            ((mEndFrame - mStartFrame + 1) * (1000 / videoItem.FPS) / generateScale()).toLong()
+            ((mEndFrame - mStartFrame + 1) * (1000.0 / videoItem.FPS.coerceAtLeast(1))).toLong()
         animator.repeatCount = if (loops <= 0) 99999 else loops - 1
         animator.addUpdateListener(mAnimatorUpdateListener)
         animator.addListener(mAnimatorListener)
@@ -167,6 +216,8 @@ open class SVGAImageView @JvmOverloads constructor(
         val drawable = getSVGADrawable() ?: return
         drawable.cleared = false
         drawable.scaleType = scaleType
+        isStaticVideoItem = false
+        drawable.setTextScrollEnabled(true)
     }
 
     private fun getSVGADrawable(): SVGADrawable? {
@@ -201,11 +252,40 @@ open class SVGAImageView @JvmOverloads constructor(
 
     private fun onAnimatorUpdate(animator: ValueAnimator?) {
         val drawable = getSVGADrawable() ?: return
-        drawable.currentFrame = animator?.animatedValue as Int
+        if ((!isViewVisible || !isRectVisible) && pauseWhenHide) {
+            drawable.updateCurrentFrame(animator?.animatedValue as Int, false)
+        } else {
+            drawable.updateCurrentFrame(animator?.animatedValue as Int)
+        }
         val percentage =
             (drawable.currentFrame + 1).toDouble() / drawable.videoItem.frames.toDouble()
         callback?.onStep(drawable.currentFrame, percentage)
     }
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        this.isViewVisible = isVisible
+        if (isVisible) {
+            lastRectVisibleCheckUptimeMillis = 0L
+        }
+    }
+
+    override fun onPreDraw(): Boolean {
+        updateRectVisible()
+        return true
+    }
+
+    private fun updateRectVisible(force: Boolean = false) {
+        if (!pauseWhenHide || !isViewVisible || !isAnimating) return
+
+        val now = SystemClock.uptimeMillis()
+        if (!force && now - lastRectVisibleCheckUptimeMillis < RECT_VISIBLE_CHECK_INTERVAL_MILLIS) {
+            return
+        }
+        isRectVisible = getGlobalVisibleRect(visibleRect)
+        lastRectVisibleCheckUptimeMillis = now
+    }
+
 
     private fun onAnimationEnd(animation: Animator?) {
         isAnimating = false
@@ -214,11 +294,11 @@ open class SVGAImageView @JvmOverloads constructor(
         if (drawable != null) {
             when (fillMode) {
                 FillMode.Backward -> {
-                    drawable.currentFrame = mStartFrame
+                    drawable.updateCurrentFrame(mStartFrame)
                 }
 
                 FillMode.Forward -> {
-                    drawable.currentFrame = mEndFrame
+                    drawable.updateCurrentFrame(mEndFrame)
                 }
 
                 FillMode.Clear -> {
@@ -229,35 +309,69 @@ open class SVGAImageView @JvmOverloads constructor(
         callback?.onFinished()
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use clearSvga or SvgaViewHandle.cancel to cancel loading and clear playback.")
     fun clear() {
+        modernPlayback?.close(); modernPlayback = null
         getSVGADrawable()?.cleared = true
-        getSVGADrawable()?.dynamicItem?.updateCallBack = null
         getSVGADrawable()?.clear()
         // 清除对 drawable 的引用
         setImageDrawable(null)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.pause or SvgaState.pause.")
     fun pauseAnimation() {
         stopAnimation(false)
         callback?.onPause()
     }
 
+    /** Resume a resource-backed presentation without resetting its position or loop count. */
+    fun resumeAnimation() {
+        modernSession()?.let { it.resume(); return }
+        startAnimation()
+    }
+
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.pause, or clearSvga to cancel loading and clear playback.")
     fun stopAnimation() {
         stopAnimation(clear = clearsAfterStop)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.pause, or clearSvga to cancel loading and clear playback.")
     fun stopAnimation(clear: Boolean) {
+        modernPlayback?.let { it.pause(); getSVGADrawable()?.cleared = clear; return }
         mAnimator?.cancel()
         mAnimator?.removeAllListeners()
         mAnimator?.removeAllUpdateListeners()
+        mAnimator = null
         getSVGADrawable()?.stop()
+        getSVGADrawable()?.setTextScrollEnabled(false)
         getSVGADrawable()?.cleared = clear
     }
 
+    override fun setImageDrawable(drawable: Drawable?) {
+        cancelImageLoading()
+        modernPlayback?.close(); modernPlayback = null
+        getSVGADrawable()?.setTextScrollEnabled(false)
+        isStaticVideoItem = false
+        (drawable as? SVGADrawable)?.setTextScrollAttached(false)
+        super.setImageDrawable(drawable)
+        if (drawable is SVGADrawable) {
+            drawable.setTextScrollAttached(isAttachedToWindow)
+            if (scope == null) {
+                pendingLoadDrawable = drawable
+            } else {
+                startLoadDrawable(drawable)
+            }
+        } else {
+            pendingLoadDrawable = null
+        }
+    }
+
+    @Deprecated("Deprecated since 3.0.0. Use loadSvga to load and bind resources; useViewControls retains manual entity binding.")
     fun setVideoItem(videoItem: SVGAVideoEntity?) {
         setVideoItem(videoItem, SVGADynamicEntity())
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use loadSvga with SvgaBindings, or SvgaViewHandle.updateBindings for dynamic updates.")
     fun setVideoItem(videoItem: SVGAVideoEntity?, dynamicItem: SVGADynamicEntity?) {
         if (videoItem == null) {
             setImageDrawable(null)
@@ -265,35 +379,69 @@ open class SVGAImageView @JvmOverloads constructor(
             val drawable = SVGADrawable(videoItem, dynamicItem ?: SVGADynamicEntity())
             drawable.cleared = true
             setImageDrawable(drawable)
-            dynamicItem?.updateCallBack = {
-                updateSvagDrawable()
-            }
         }
     }
 
     //静止的
+    @Deprecated("Deprecated since 3.0.0. Use loadSvga with staticImage = true.")
     fun setStaticVideoItem(videoItem: SVGAVideoEntity?) {
         setStaticVideoItem(videoItem, SVGADynamicEntity())
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use loadSvga with staticImage = true and SvgaBindings.")
     fun setStaticVideoItem(
         videoItem: SVGAVideoEntity?,
-        dynamicItem: SVGADynamicEntity?
+        dynamicItem: SVGADynamicEntity?,
     ): SVGADrawable? {
         if (videoItem == null) {
             setImageDrawable(null)
         } else {
-
             val drawable = SVGADrawable(videoItem, dynamicItem ?: SVGADynamicEntity())
             drawable.cleared = false
+            drawable.setTextScrollEnabled(true)
             setImageDrawable(drawable)
-            dynamicItem?.updateCallBack = {
-                updateSvagDrawable()
-            }
+            isStaticVideoItem = true
             return drawable
         }
         return null
     }
+
+    private fun startLoadDrawable(drawable: SVGADrawable) {
+        pendingLoadDrawable = null
+        cancelImageLoading()
+        val version = imageLoadVersion
+        imageLoadJob = scope?.launch {
+            launch {
+                drawable.videoItem.parserImages(this@SVGAImageView)
+                withContext(Dispatchers.Main.immediate) {
+                    if (!isCurrentImageLoad(drawable, version)) return@withContext
+                    parserImagesEndCallBack?.invoke()
+                    // The callback may replace or clear the presentation itself.
+                    if (isCurrentImageLoad(drawable, version)) updateSvagDrawable()
+                }
+            }
+            launch {
+                try {
+                    drawable.dynamicItem.requestDynamicImage(this@SVGAImageView)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                }
+                withContext(Dispatchers.Main.immediate) {
+                    if (isCurrentImageLoad(drawable, version)) updateSvagDrawable()
+                }
+            }
+        }
+    }
+
+    private fun cancelImageLoading() {
+        ++imageLoadVersion
+        imageLoadJob?.cancel()
+        imageLoadJob = null
+    }
+
+    private fun isCurrentImageLoad(drawable: SVGADrawable, version: Long) =
+        version == imageLoadVersion && this.drawable === drawable && isAttachedToWindow
 
     private fun updateSvagDrawable() {
         if (isAnimating) {
@@ -305,10 +453,18 @@ open class SVGAImageView @JvmOverloads constructor(
         }
     }
 
+    private fun modernSession(): SvgaLegacyViewSession? {
+        val drawable = getSVGADrawable() ?: return null
+        val resource = drawable.videoItem.resource ?: return null
+        return modernPlayback ?: SvgaLegacyViewSession(this, drawable, resource).also { modernPlayback = it }
+    }
+
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.seekToProgress and pause/resume; use SvgaPlayback.seekFrame for a custom renderer.")
     fun stepToFrame(frame: Int, andPlay: Boolean) {
+        modernSession()?.let { it.seek(frame, andPlay); return }
         pauseAnimation()
         val drawable = getSVGADrawable() ?: return
-        drawable.currentFrame = frame
+        drawable.updateCurrentFrame(frame)
         if (andPlay) {
             startAnimation()
             mAnimator?.let {
@@ -320,6 +476,7 @@ open class SVGAImageView @JvmOverloads constructor(
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Use SvgaViewHandle.seekToProgress and pause/resume, or the corresponding SvgaState methods.")
     fun stepToPercentage(percentage: Double, andPlay: Boolean) {
         val drawable = drawable as? SVGADrawable ?: return
         var frame = (drawable.videoItem.frames * percentage).toInt()
@@ -329,6 +486,7 @@ open class SVGAImageView @JvmOverloads constructor(
         stepToFrame(frame, andPlay)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Retained for legacy View click areas; Compose supports SvgaView.onLayerClick.")
     fun setOnAnimKeyClickListener(clickListener: SVGAClickAreaListener) {
         mItemClickAreaListener = clickListener
     }
@@ -351,14 +509,44 @@ open class SVGAImageView @JvmOverloads constructor(
         return super.onTouchEvent(event)
     }
 
+    override fun onAttachedToWindow() {
+        scope?.close()
+        scope = CloseableCoroutineScope(SupervisorJob() + SVGAParser.coroutineDispatcher)
+        super.onAttachedToWindow()
+        getSVGADrawable()?.setTextScrollAttached(true)
+        (pendingLoadDrawable ?: getSVGADrawable())?.let {
+            startLoadDrawable(it)
+        }
+        if (!isAddOnPreDraw) {
+            viewTreeObserver.addOnPreDrawListener(this)
+            isAddOnPreDraw = true
+        }
+    }
+
     override fun onDetachedFromWindow() {
+        modernPlayback?.close(); modernPlayback = null
+        cancelImageLoading()
+        scope?.close()
+        scope = null
+        if (isAddOnPreDraw) {
+            viewTreeObserver.removeOnPreDrawListener(this)
+            isAddOnPreDraw = false
+        }
+        val drawable = getSVGADrawable()
+        drawable?.setTextScrollAttached(false)
         super.onDetachedFromWindow()
         removeCallbacks(updateSvagDrawableCallBack)
-        stopAnimation(clearsAfterDetached)
+        if (isStaticVideoItem && !clearsAfterDetached) {
+            drawable?.stop()
+        } else {
+            stopAnimation(clearsAfterDetached)
+        }
+        parserImagesEndCallBack = null
         if (clearsAfterDetached) {
             clear()
         }
     }
+
 
     private class AnimatorListener(view: SVGAImageView) : Animator.AnimatorListener {
         private val weakReference = WeakReference<SVGAImageView>(view)
@@ -376,7 +564,10 @@ open class SVGAImageView @JvmOverloads constructor(
         }
 
         override fun onAnimationStart(animation: Animator) {
-            weakReference.get()?.isAnimating = true
+            weakReference.get()?.run {
+                isAnimating = true
+                updateRectVisible(force = true)
+            }
         }
     } // end of AnimatorListener
 
@@ -389,4 +580,10 @@ open class SVGAImageView @JvmOverloads constructor(
             weakReference.get()?.onAnimatorUpdate(animation)
         }
     } // end of AnimatorUpdateListener
+
+    companion object {
+        /** Install at application startup to route XML sources through the host's modern loader. */
+        var sourceLoader: ((SVGAImageView, String, Boolean) -> Unit)? = null
+        const val RECT_VISIBLE_CHECK_INTERVAL_MILLIS = 100L
+    }
 }

@@ -1,0 +1,78 @@
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/D:/LIbs/java/gradle/wrapper/dists/gradle-8.14.2-bin/2pb3mgt1p815evrl3weanttgr/gradle-8.14.2/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+> Task :svga-coil3:preBuild UP-TO-DATE
+> Task :svga-coil3:preReleaseBuild UP-TO-DATE
+> Task :svga-coil3:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :svga-coil3:mergeReleaseNativeLibs NO-SOURCE
+> Task :svga-coil3:stripReleaseDebugSymbols NO-SOURCE
+> Task :svga-coil3:copyReleaseJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :svga-coil3:generateReleaseResValues UP-TO-DATE
+> Task :svga-coil3:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :library:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :library:preBuild UP-TO-DATE
+> Task :library:preReleaseBuild UP-TO-DATE
+> Task :library:generateReleaseResValues UP-TO-DATE
+> Task :library:generateReleaseResources UP-TO-DATE
+> Task :library:packageReleaseResources UP-TO-DATE
+> Task :library:parseReleaseLocalResources UP-TO-DATE
+> Task :library:generateReleaseRFile UP-TO-DATE
+> Task :library:compileReleaseKotlin UP-TO-DATE
+> Task :library:javaPreCompileRelease UP-TO-DATE
+> Task :library:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :library:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :svga-coil3:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :svga-coil3:generateReleaseResources UP-TO-DATE
+> Task :svga-coil3:packageReleaseResources UP-TO-DATE
+> Task :svga-coil3:parseReleaseLocalResources UP-TO-DATE
+> Task :svga-coil3:generateReleaseRFile UP-TO-DATE
+> Task :svga-loader:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :svga-loader:preBuild UP-TO-DATE
+> Task :svga-loader:preReleaseBuild UP-TO-DATE
+> Task :svga-loader:generateReleaseResValues UP-TO-DATE
+> Task :svga-loader:generateReleaseResources UP-TO-DATE
+> Task :svga-loader:packageReleaseResources UP-TO-DATE
+> Task :svga-loader:parseReleaseLocalResources UP-TO-DATE
+> Task :svga-loader:generateReleaseRFile UP-TO-DATE
+> Task :svga-loader:compileReleaseKotlin UP-TO-DATE
+> Task :svga-loader:javaPreCompileRelease UP-TO-DATE
+> Task :svga-loader:compileReleaseJavaWithJavac NO-SOURCE
+> Task :svga-loader:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :svga-coil3:mergeReleaseShaders UP-TO-DATE
+> Task :svga-coil3:compileReleaseShaders NO-SOURCE
+> Task :svga-coil3:generateReleaseAssets UP-TO-DATE
+> Task :svga-coil3:mergeReleaseAssets UP-TO-DATE
+> Task :svga-coil3:javaPreCompileRelease UP-TO-DATE
+> Task :svga-coil3:prepareLintJarForPublish UP-TO-DATE
+> Task :svga-coil3:prepareReleaseArtProfile UP-TO-DATE
+> Task :svga-coil3:processReleaseManifest UP-TO-DATE
+> Task :svga-coil3:writeReleaseAarMetadata UP-TO-DATE
+> Task :svga-coil3:sourceReleaseJar
+> Task :svga-coil3:generatePomFileForReleasePublication
+
+> Task :svga-coil3:compileReleaseKotlin
+w: file:///D:/workplace/android/SVGAPlayer-Android/svga-coil3/src/main/java/com/opensource/svgaplayer/coil3/SvgaBindings.kt:29:78 'field scaledDensity: Float' is deprecated. Deprecated in Java.
+
+> Task :svga-coil3:extractReleaseAnnotations
+> Task :svga-coil3:compileReleaseJavaWithJavac NO-SOURCE
+> Task :svga-coil3:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :svga-coil3:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :svga-coil3:processReleaseJavaRes UP-TO-DATE
+> Task :svga-coil3:mergeReleaseJavaResource UP-TO-DATE
+> Task :svga-coil3:syncReleaseLibJars
+> Task :svga-coil3:bundleReleaseAar
+> Task :svga-coil3:generateMetadataFileForReleasePublication
+> Task :svga-coil3:publishReleasePublicationToMavenRepository
+
+[Incubating] Problems report is available at: file:///D:/workplace/android/SVGAPlayer-Android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.2/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 8s
+44 actionable tasks: 8 executed, 36 up-to-date

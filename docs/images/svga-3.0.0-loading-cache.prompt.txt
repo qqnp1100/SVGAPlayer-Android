@@ -1,0 +1,49 @@
+Generated with the built-in image_gen tool.
+
+Initial generation prompt:
+
+Use case: infographic-diagram
+Asset type: production Chinese technical flowchart PNG for the repository README.
+Primary request: explain the real SVGAPlayer Android 3.0.0 modern loading and caching pipeline. Generate ONE complete, high resolution flowchart, around 2400 x 2100 pixels, white opaque background. All user-facing text in simplified Chinese except verbatim API names. Use clean precise engineering documentation design, large sans-serif Chinese typography, navy text, thin orthogonal arrows with visible arrowheads, teal process boxes, amber decision diamonds, green success boxes, muted red error box, subtle light-gray panels. No illustration, no decorative icons, no watermark, no perspective, no fake code. All text must be sharp and readable when viewed at full resolution.
+Title verbatim: "SVGA 3.0.0 加载与缓存流程"
+Three spacious numbered panels stacked vertically with room for branches, connected in order. Every described arrow and yes/no label must be present and unambiguous. Diagram is an overview, so do not invent extra steps.
+
+PANEL 1 heading: "1  内存快速命中"
+Top node: "请求：URL / File / Assets" second line "来源身份 + 尺寸 + 解码配置".
+Down arrow to decision "强 LRU 命中？"; its "否" arrow goes down to decision "弱索引命中？".
+The two "是" arrows go to a green node at the right side of panel 1 reading "返回共享资源", followed by a box "创建独立展示会话" then "View / Compose". This is the early success path only.
+The weak hit arrow has a small readable label "按策略可提升到强 LRU".
+The weak decision "否" arrow continues to panel 2 first node.
+Small note in panel 1: "只查询已开启的缓存；快速命中需满足新鲜度"
+Another note: "refresh = true：失效并绕过两层内存缓存，进入来源获取"
+
+PANEL 2 heading: "2  获取完整来源"
+Top node "合并兼容的来源请求" second line "同来源 + 网络 / 磁盘策略".
+Then branch node "来源类型".
+Its left branch label "File / Assets" goes to box "读取本地文件 / Assets", then to common node at the bottom of this panel "取得完整正文".
+Its right branch label "URL" goes to decision "磁盘正文可直接使用？". "是" goes to common node "取得完整正文"; "否" goes to decision "cacheOnly？".
+"cacheOnly？" "是" arrow goes to red terminal "缓存未命中：返回错误"; "否" arrow goes to box "HTTP 下载 / 条件校验".
+Inside or immediately beneath HTTP box show verbatim two lines: "304：复用已有正文" and "200 / 206：获取完整正文".
+HTTP box arrow goes to common node "取得完整正文".
+Keep branch edges orthogonal without crossings through nodes.
+Small note directly beneath disk decision: "未刷新，且缓存新鲜或 cacheOnly"
+Small footer note in this panel: "符合条件时 Range / If-Range 续传；无可用片段则完整下载"
+
+PANEL 3 heading: "3  复用、解码与发布"
+Panel 2 common node arrow to box "计算正文 SHA-256".
+Down arrow to decision "同摘要、同解码规格已有资源？".
+"是" arrow goes to green box "返回共享资源" near lower right.
+"否" arrow goes to box "合并相同规格的解码" followed by box "后台解码 / 图片采样".
+Then box "成功后按策略发布缓存" with smaller subtext "完整磁盘正文 + 强 LRU / 弱索引".
+Then green box "返回共享资源"; merge with previous yes path using one shared green node.
+After the common green node: box "创建独立展示会话" and terminal "View / Compose".
+Small note next to digest hit path: "复用后也可发布已验证的完整正文"
+Footer notes: "no-store / Vary: *：不发布可复用缓存"
+"下载完成 ≠ 播放就绪；动态填充、首帧与音频准备后 onReady"
+"单个订阅者取消不影响其他订阅者；最后一个取消才中断共享任务"
+Constraints: Preserve the precise cache lookup order strong LRU then weak index. File/Assets must not be shown using HTTP disk cache. cacheOnly branch must never access the network. HTTP 304 must use an existing complete body, never decode an incomplete partial file. Complete cache publication follows successful decode or validated reuse. Shared resources must lead to separate presentation sessions. Do not use the claim that every load downloads or every load decodes. Do not invent performance figures.
+
+Final targeted edit prompt:
+
+Edit this technical Chinese SVGA flowchart. Change ONLY one erroneous edge in panel 2 "获取完整来源". The horizontal arrow coming out of "来源类型" on the URL branch incorrectly continues across to an arrow down into "cacheOnly？". Remove that continuation segment and its downward arrowhead into "cacheOnly？". The URL branch must end at its downward arrow into "磁盘正文可直接使用？". Preserve the existing arrow from the disk decision labeled "否" into "cacheOnly？". Thus the ONLY input into cacheOnly is the disk decision's no branch. Make this routing completely explicit: 来源类型 --URL--> 磁盘正文可直接使用？ --否--> cacheOnly？. Keep every other node, edge, word, typography, layout, color, background and all three panels unchanged. Do not add new arrows or alter any text. Return the full original diagram with this single edge removed.
+

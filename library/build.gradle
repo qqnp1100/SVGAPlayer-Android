@@ -1,16 +1,20 @@
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
+apply from: rootProject.file('publish.gradle')
 
 
 android {
     namespace "com.opensource.svgaplayer"
-    compileSdk 33
+    compileSdk 35
     defaultConfig {
         minSdkVersion 21
-        targetSdkVersion 33
+        targetSdkVersion 35
     }
     compileOptions {
 //        kotlinOptions.freeCompilerArgs += ['-module-name', "com.opensource.svgaplayer"]
+    }
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17.toString()
     }
     buildTypes {
         release {
@@ -34,6 +38,8 @@ android {
 
 
 dependencies {
-    implementation 'com.squareup.wire:wire-runtime:4.8.0'
-    implementation 'androidx.appcompat:appcompat:1.2.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+    implementation 'com.squareup.wire:wire-runtime:5.3.6'
+    api 'androidx.appcompat:appcompat:1.7.1'
+    testImplementation 'junit:junit:4.13.2'
 }

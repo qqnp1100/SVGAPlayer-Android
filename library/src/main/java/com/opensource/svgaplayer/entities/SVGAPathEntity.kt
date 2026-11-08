@@ -10,6 +10,8 @@ class SVGAPathEntity(originValue: String) {
 
     private val replacedValue: String = if (originValue.contains(",")) originValue.replace(",", " ") else originValue
 
+    internal val pathData: String get() = replacedValue
+
     private var cachedPath: Path? = null
 
     fun buildPath(toPath: Path) {

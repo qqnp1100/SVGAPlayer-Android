@@ -3,5 +3,9 @@
 .idea/
 .DS_Store
 /build
+**/build/
+build-check.log
+device-tests.log
+verification/
 /captures
 *.iml

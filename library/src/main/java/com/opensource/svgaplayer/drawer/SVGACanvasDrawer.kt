@@ -6,9 +6,11 @@ import android.text.StaticLayout
 import android.text.TextUtils
 import android.widget.ImageView
 import com.opensource.svgaplayer.SVGADynamicEntity
+import com.opensource.svgaplayer.SVGADynamicImage
 import com.opensource.svgaplayer.SVGASoundManager
 import com.opensource.svgaplayer.SVGAVideoEntity
 import com.opensource.svgaplayer.entities.SVGAVideoShapeEntity
+import com.opensource.svgaplayer.entities.SvgaFrameTransform
 import com.opensource.svgaplayer.utils.log.LogUtils
 
 /**
@@ -18,161 +20,117 @@ import com.opensource.svgaplayer.utils.log.LogUtils
 internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicEntity) :
     SGVADrawer(videoItem) {
 
+    private data class ScrollingTextShader(
+        val bitmap: Bitmap,
+        val viewportWidth: Int,
+        val bitmapShader: BitmapShader,
+        val composedShader: ComposeShader,
+    )
+
+    companion object {
+        private const val DEFAULT_MAX_TEMP_BITMAP_SIZE = 32766
+        private const val MAX_TEMP_BITMAP_BYTES = 64L * 1024L * 1024L
+        private const val MAX_TEXT_BITMAP_CACHE_BYTES = 16L * 1024L * 1024L
+    }
+
     private val sharedValues = ShareValues()
     private val drawTextCache: HashMap<String, Bitmap> = hashMapOf()
-    private val drawTextGradientCache: HashMap<String, Bitmap> = hashMapOf()
-    private val scrollTextPosition: HashMap<String, Float> = hashMapOf()
-    private val scrollTextSpeed: HashMap<String, Float> = hashMapOf()
+    private val scrollingTextShaders = HashMap<String, ScrollingTextShader>()
+    private val scrollTimeline = TextScrollTimeline()
+    private val frameChangeGate = FrameChangeGate()
     private val pathCache = PathCache()
+    private val matteSprites: HashMap<String, SVGADrawerSprite> = hashMapOf()
+    private val matrixValues = FloatArray(9)
+    private val clickMatrixValues = FloatArray(9)
+    private val frameTransformMatrix = Matrix()
+    private var copiedFrameTransform: SvgaFrameTransform? = null
 
-    private var beginIndexList: Array<Boolean>? = null
-    private var endIndexList: Array<Boolean>? = null
     private var mySoundId: Int? = null
+    private var textCacheCanvasWidth: Int = 0
+    private var textCacheCanvasHeight: Int = 0
+    private var frameTimeNanos = 0L
+
+    @Volatile
+    var hasActiveScrollingText = false
+        private set
+
+    private var viewportWidth = 0
+    private var viewportHeight = 0
 
     override fun drawFrame(canvas: Canvas, frameIndex: Int, scaleType: ImageView.ScaleType) {
-        super.drawFrame(canvas, frameIndex, scaleType)
-        playAudio(frameIndex)
-        this.pathCache.onSizeChanged(canvas)
+        renderFrame(canvas, frameIndex, scaleType, canvas.width, canvas.height, System.nanoTime(), true)
+    }
+
+    // A worker can prepare the same drawer that a View draws. Protect the entire frame,
+    // including sprite pooling and caches, rather than individual Path operations.
+    // Presentation owners use this same monitor when releasing their video/bindings.
+    @Synchronized
+    fun renderFrame(canvas: Canvas, frameIndex: Int, scaleType: ImageView.ScaleType,
+                    width: Int, height: Int, timeNanos: Long, legacyAudio: Boolean = false) {
+        viewportWidth = width
+        viewportHeight = height
+        hasActiveScrollingText = false
+        if (viewportWidth <= 0 || viewportHeight <= 0) {
+            return
+        }
+        frameTimeNanos = timeNanos
+        scaleInfo.performScaleType(width.toFloat(), height.toFloat(), videoItem.videoSize.width.toFloat(), videoItem.videoSize.height.toFloat(), scaleType)
+        if (legacyAudio && frameChangeGate.shouldProcess(frameIndex)) {
+            playAudio(frameIndex)
+        }
+        if (textCacheCanvasWidth != viewportWidth || textCacheCanvasHeight != viewportHeight) {
+            clearTextBitmapCaches()
+            textCacheCanvasWidth = viewportWidth
+            textCacheCanvasHeight = viewportHeight
+        }
+        this.pathCache.onSizeChanged(width, height)
         val sprites = requestFrameSprites(frameIndex)
         // Filter null sprites
         if (sprites.count() <= 0) return
-        val matteSprites = mutableMapOf<String, SVGADrawerSprite>()
+        matteSprites.clear()
         var saveID = -1
-        beginIndexList = null
-        endIndexList = null
 
-        // Filter no matte layer
-        var hasMatteLayer = false
-        sprites.get(0).imageKey?.let {
-            if (it.endsWith(".matte")) {
-                hasMatteLayer = true
-            }
+        for (sprite in sprites) {
+            val key = sprite.imageKey
+            if (key != null && key.endsWith(".matte")) matteSprites[key] = sprite
         }
-        sprites.forEachIndexed { index, svgaDrawerSprite ->
-
-            // Save matte sprite
-            svgaDrawerSprite.imageKey?.let {
-                /// No matte layer included or VERSION Unsopport matte
-                if (!hasMatteLayer || Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-                    // Normal sprite
-                    drawSprite(svgaDrawerSprite, canvas, frameIndex)
-                    // Continue
+        try {
+            sprites.forEachIndexed { index, sprite ->
+                if (sprite.imageKey?.endsWith(".matte") == true) return@forEachIndexed
+                if (matteSprites.isEmpty()) {
+                    drawSprite(sprite, canvas, frameIndex)
                     return@forEachIndexed
                 }
-                /// Cache matte sprite
-                if (it.endsWith(".matte")) {
-                    matteSprites.put(it, svgaDrawerSprite)
-                    // Continue
-                    return@forEachIndexed
+                if (isMatteBegin(index, sprites)) {
+                    saveID = canvas.saveLayer(0f, 0f, viewportWidth.toFloat(), viewportHeight.toFloat(), null)
                 }
-            }
-            /// Is matte begin
-            if (isMatteBegin(index, sprites)) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    saveID = canvas.saveLayer(
-                        0f,
-                        0f,
-                        canvas.width.toFloat(),
-                        canvas.height.toFloat(),
-                        null
-                    )
-                } else {
-                    canvas.save()
-                }
-            }
-            /// Normal matte
-            drawSprite(svgaDrawerSprite, canvas, frameIndex)
-
-            /// Is matte end
-            if (isMatteEnd(index, sprites)) {
-                matteSprites.get(svgaDrawerSprite.matteKey)?.let {
-                    drawSprite(
-                        it,
-                        this.sharedValues.shareMatteCanvas(canvas.width, canvas.height),
-                        frameIndex
-                    )
-                    canvas.drawBitmap(
-                        this.sharedValues.sharedMatteBitmap(),
-                        0f,
-                        0f,
-                        this.sharedValues.shareMattePaint()
-                    )
-                    if (saveID != -1) {
-                        canvas.restoreToCount(saveID)
-                    } else {
-                        canvas.restore()
-                    }
-                    // Continue
-                    return@forEachIndexed
-                }
-            }
-        }
-        releaseFrameSprites(sprites)
-    }
-
-    private fun isMatteBegin(spriteIndex: Int, sprites: List<SVGADrawerSprite>): Boolean {
-        if (beginIndexList == null) {
-            val boolArray = Array(sprites.count()) { false }
-            sprites.forEachIndexed { index, svgaDrawerSprite ->
-                svgaDrawerSprite.imageKey?.let {
-                    /// Filter matte sprite
-                    if (it.endsWith(".matte")) {
-                        // Continue
-                        return@forEachIndexed
-                    }
-                }
-                svgaDrawerSprite.matteKey?.let {
-                    if (it.length > 0) {
-                        sprites.get(index - 1)?.let { lastSprite ->
-                            if (lastSprite.matteKey.isNullOrEmpty()) {
-                                boolArray[index] = true
-                            } else {
-                                if (lastSprite.matteKey != svgaDrawerSprite.matteKey) {
-                                    boolArray[index] = true
-                                }
-                            }
+                drawSprite(sprite, canvas, frameIndex)
+                if (isMatteEnd(index, sprites)) {
+                    matteSprites[sprite.matteKey]?.let { matte ->
+                        val matteCanvas = sharedValues.shareMatteCanvas(viewportWidth, viewportHeight)
+                        val bitmap = sharedValues.sharedMatteBitmap()
+                        if (matteCanvas != null && bitmap != null) {
+                            drawSprite(matte, matteCanvas, frameIndex)
+                            canvas.drawBitmap(bitmap, 0f, 0f, sharedValues.shareMattePaint())
                         }
                     }
+                    if (saveID != -1) { canvas.restoreToCount(saveID); saveID = -1 }
                 }
             }
-            beginIndexList = boolArray
+        } finally {
+            if (saveID != -1) canvas.restoreToCount(saveID)
+            releaseFrameSprites(sprites)
         }
-        return beginIndexList?.get(spriteIndex) ?: false
     }
 
-    private fun isMatteEnd(spriteIndex: Int, sprites: List<SVGADrawerSprite>): Boolean {
-        if (endIndexList == null) {
-            val boolArray = Array(sprites.count()) { false }
-            sprites.forEachIndexed { index, svgaDrawerSprite ->
-                svgaDrawerSprite.imageKey?.let {
-                    /// Filter matte sprite
-                    if (it.endsWith(".matte")) {
-                        // Continue
-                        return@forEachIndexed
-                    }
-                }
-                svgaDrawerSprite.matteKey?.let {
-                    if (it.length > 0) {
-                        // Last one
-                        if (index == sprites.count() - 1) {
-                            boolArray[index] = true
-                        } else {
-                            sprites.get(index + 1)?.let { nextSprite ->
-                                if (nextSprite.matteKey.isNullOrEmpty()) {
-                                    boolArray[index] = true
-                                } else {
-                                    if (nextSprite.matteKey != svgaDrawerSprite.matteKey) {
-                                        boolArray[index] = true
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            endIndexList = boolArray
-        }
-        return endIndexList?.get(spriteIndex) ?: false
+    private fun isMatteBegin(index: Int, sprites: List<SVGADrawerSprite>): Boolean {
+        val key = sprites[index].matteKey
+        return !key.isNullOrEmpty() && sprites.getOrNull(index - 1)?.matteKey != key
+    }
+
+    private fun isMatteEnd(index: Int, sprites: List<SVGADrawerSprite>): Boolean {
+        val key = sprites[index].matteKey
+        return !key.isNullOrEmpty() && sprites.getOrNull(index + 1)?.matteKey != key
     }
 
     private fun playAudio(frameIndex: Int) {
@@ -208,21 +166,195 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         }
     }
 
-    private fun shareFrameMatrix(transform: Matrix): Matrix {
+    private fun shareFrameMatrix(transform: SvgaFrameTransform): Matrix {
         val matrix = this.sharedValues.sharedMatrix()
         matrix.postScale(scaleInfo.scaleFx, scaleInfo.scaleFy)
         matrix.postTranslate(scaleInfo.tranFx, scaleInfo.tranFy)
-        matrix.preConcat(transform)
+        if (copiedFrameTransform !== transform) {
+            transform.copyTo(frameTransformMatrix, matrixValues)
+            copiedFrameTransform = transform
+        }
+        matrix.preConcat(frameTransformMatrix)
         return matrix
     }
 
+    private fun safeScrollTextBitmapWidth(
+        canvas: Canvas,
+        drawingBitmapHeight: Int,
+        frameMatrix: Matrix,
+        textWidth: Float
+    ): Int {
+        if (viewportWidth <= 0 || drawingBitmapHeight <= 0) {
+            return 0
+        }
+        frameMatrix.getValues(matrixValues)
+        val requestedWidth = textWidth.toDouble() +
+            dynamicItem.srcollTextSpace.toDouble() *
+            videoItem.videoSize.width.toDouble() *
+            mappedXScale(matrixValues).toDouble() /
+            viewportWidth.toDouble()
+        if (!java.lang.Double.isFinite(requestedWidth) || requestedWidth <= 0.0) {
+            return 0
+        }
+        val requestedInt = requestedWidth
+            .coerceAtMost(Int.MAX_VALUE.toDouble())
+            .toInt()
+        return safeTempBitmapWidth(
+            requestedInt,
+            drawingBitmapHeight,
+            Bitmap.Config.ARGB_8888,
+            canvas,
+            "scroll text"
+        )
+    }
+
+    private fun createTempBitmap(
+        requestedWidth: Int,
+        requestedHeight: Int,
+        config: Bitmap.Config,
+        canvas: Canvas,
+        usage: String
+    ): Bitmap? {
+        val safeWidth = safeTempBitmapWidth(requestedWidth, requestedHeight, config, canvas, usage)
+        if (safeWidth <= 0) {
+            return null
+        }
+        return try {
+            Bitmap.createBitmap(safeWidth, requestedHeight, config)
+        } catch (error: OutOfMemoryError) {
+            LogUtils.error("SVGACanvasDrawer", error)
+            null
+        } catch (error: IllegalArgumentException) {
+            LogUtils.error("SVGACanvasDrawer", error)
+            null
+        }
+    }
+
+    private fun clearTextBitmapCaches() {
+        this.scrollingTextShaders.clear()
+        this.scrollTimeline.clear()
+        this.drawTextCache.values.forEach { bitmap ->
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
+        this.drawTextCache.clear()
+    }
+
+    @Synchronized
+    fun clearCaches() {
+        clearTextBitmapCaches()
+        this.frameChangeGate.clear()
+        this.pathCache.clear()
+        this.sharedValues.clear()
+    }
+
+    @Synchronized
+    fun pauseTextScrolling() {
+        hasActiveScrollingText = false
+        scrollTimeline.pause()
+    }
+
+    private fun cacheTextBitmap(cacheKey: String, bitmap: Bitmap) {
+        drawTextCache.put(cacheKey, bitmap)?.let {
+            if (it !== bitmap && !it.isRecycled) {
+                discardScrollingTextShader(it)
+                it.recycle()
+            }
+        }
+        trimTextBitmapCache(drawTextCache, bitmap)
+    }
+
+    private fun discardScrollingTextShader(bitmap: Bitmap) {
+        scrollingTextShaders.entries.removeAll { it.value.bitmap === bitmap }
+    }
+
+    private fun trimTextBitmapCache(cache: HashMap<String, Bitmap>, protectedBitmap: Bitmap) {
+        var totalBytes = cache.values.sumOf { bitmapByteCount(it) }
+        if (totalBytes <= MAX_TEXT_BITMAP_CACHE_BYTES) {
+            return
+        }
+        val iterator = cache.entries.iterator()
+        while (iterator.hasNext() && totalBytes > MAX_TEXT_BITMAP_CACHE_BYTES) {
+            val entry = iterator.next()
+            if (entry.value === protectedBitmap) {
+                continue
+            }
+            totalBytes -= bitmapByteCount(entry.value)
+            if (!entry.value.isRecycled) {
+                discardScrollingTextShader(entry.value)
+                entry.value.recycle()
+            }
+            iterator.remove()
+        }
+    }
+
+    private fun bitmapByteCount(bitmap: Bitmap): Long {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            bitmap.allocationByteCount.toLong()
+        } else {
+            bitmap.byteCount.toLong()
+        }
+    }
+
+    private fun mappedXScale(matrixValues: FloatArray): Float {
+        val scaleX = matrixValues[Matrix.MSCALE_X].toDouble()
+        val skewY = matrixValues[Matrix.MSKEW_Y].toDouble()
+        val scale = Math.sqrt(scaleX * scaleX + skewY * skewY).toFloat()
+        return if (java.lang.Float.isFinite(scale) && scale > 0f) scale else 1f
+    }
+
+    private fun safeTempBitmapWidth(
+        requestedWidth: Int,
+        requestedHeight: Int,
+        config: Bitmap.Config,
+        canvas: Canvas,
+        usage: String
+    ): Int {
+        if (requestedWidth <= 0 || requestedHeight <= 0) {
+            LogUtils.warn(msg = "Skip $usage bitmap, invalid size ${requestedWidth}x${requestedHeight}.")
+            return 0
+        }
+        val maxCanvasWidth = canvas.maximumBitmapWidth
+            .takeIf { it > 0 }
+            ?: DEFAULT_MAX_TEMP_BITMAP_SIZE
+        val maxCanvasHeight = canvas.maximumBitmapHeight
+            .takeIf { it > 0 }
+            ?: DEFAULT_MAX_TEMP_BITMAP_SIZE
+        if (requestedHeight > maxCanvasHeight) {
+            LogUtils.warn(msg = "Skip $usage bitmap, height $requestedHeight exceeds canvas limit $maxCanvasHeight.")
+            return 0
+        }
+        val byteLimitedWidth = (
+            MAX_TEMP_BITMAP_BYTES /
+                (requestedHeight.toLong() * bytesPerPixel(config).toLong())
+            )
+            .coerceAtLeast(1L)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        val safeWidth = minOf(requestedWidth, maxCanvasWidth, byteLimitedWidth)
+        if (safeWidth < requestedWidth) {
+            LogUtils.warn(msg = "Clamp $usage bitmap width from $requestedWidth to $safeWidth.")
+        }
+        return safeWidth
+    }
+
+    private fun bytesPerPixel(config: Bitmap.Config): Int {
+        return when (config) {
+            Bitmap.Config.ALPHA_8 -> 1
+            Bitmap.Config.RGB_565,
+            Bitmap.Config.ARGB_4444 -> 2
+            else -> 4
+        }
+    }
+
     private fun drawSprite(sprite: SVGADrawerSprite, canvas: Canvas, frameIndex: Int) {
-        drawImage(sprite, canvas)
+        drawImage(sprite, canvas, frameIndex)
         drawShape(sprite, canvas)
         drawDynamic(sprite, canvas, frameIndex)
     }
 
-    private fun drawImage(sprite: SVGADrawerSprite, canvas: Canvas) {
+    private fun drawImage(sprite: SVGADrawerSprite, canvas: Canvas, frameIndex: Int) {
         val imageKey = sprite.imageKey ?: return
         val isHidden = dynamicItem.dynamicHidden[imageKey] == true
         if (isHidden) {
@@ -232,14 +364,47 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             0,
             imageKey.length - 6
         ) else imageKey
-        val drawingBitmap =
-            (dynamicItem.getDynamicImage(bitmapKey) ?: videoItem.imageMap[bitmapKey])
-                ?: return
+        val dynamicAnimatedImage = dynamicItem.getDynamicAnimatedImage(bitmapKey)
+        val drawingBitmap = dynamicItem.getDynamicImage(bitmapKey) ?: videoItem.bitmap(bitmapKey)
+        if (dynamicAnimatedImage == null && drawingBitmap == null) {
+            return
+        }
+        val imageWidth = dynamicAnimatedImage?.width ?: drawingBitmap?.width ?: return
+        val imageHeight = dynamicAnimatedImage?.height ?: drawingBitmap?.height ?: return
+        if (imageWidth <= 0 || imageHeight <= 0) {
+            return
+        }
+        val layoutWidth = sprite.frameEntity.layout.width
+        val layoutHeight = sprite.frameEntity.layout.height
         val frameMatrix = shareFrameMatrix(sprite.frameEntity.transform)
         val paint = this.sharedValues.sharedPaint()
         paint.isAntiAlias = videoItem.antiAlias
         paint.isFilterBitmap = videoItem.antiAlias
         paint.alpha = (sprite.frameEntity.alpha * 255).toInt()
+        if (dynamicAnimatedImage != null) {
+            drawAnimatedImage(
+                dynamicAnimatedImage,
+                canvas,
+                sprite,
+                frameMatrix,
+                paint,
+                frameIndex
+            )
+            dynamicItem.dynamicIClickArea.let {
+                it.get(imageKey)?.let { listener ->
+                    frameMatrix.getValues(clickMatrixValues)
+                    listener.onResponseArea(
+                        imageKey,
+                        clickMatrixValues[2].toInt(),
+                        clickMatrixValues[5].toInt(),
+                        (layoutWidth * clickMatrixValues[0] + clickMatrixValues[2]).toInt(),
+                        (layoutHeight * clickMatrixValues[4] + clickMatrixValues[5]).toInt()
+                    )
+                }
+            }
+            drawTextOnBitmap(canvas, layoutWidth.toInt(), layoutHeight.toInt(), sprite, frameMatrix)
+            return
+        }
         if (sprite.frameEntity.maskPath != null) {
             val maskPath = sprite.frameEntity.maskPath ?: return
             canvas.save()
@@ -248,46 +413,81 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             path.transform(frameMatrix)
             canvas.clipPath(path)
             frameMatrix.preScale(
-                (sprite.frameEntity.layout.width / drawingBitmap.width).toFloat(),
-                (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat()
+                (layoutWidth / imageWidth).toFloat(),
+                (layoutHeight / imageHeight).toFloat()
             )
-            if (!drawingBitmap.isRecycled) {
+            if (drawingBitmap != null && !drawingBitmap.isRecycled) {
                 canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
             }
             canvas.restore()
         } else {
             frameMatrix.preScale(
-                (sprite.frameEntity.layout.width / drawingBitmap.width).toFloat(),
-                (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat()
+                (layoutWidth / imageWidth).toFloat(),
+                (layoutHeight / imageHeight).toFloat()
             )
-            if (!drawingBitmap.isRecycled) {
+            if (drawingBitmap != null && !drawingBitmap.isRecycled) {
                 canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
             }
         }
         dynamicItem.dynamicIClickArea.let {
             it.get(imageKey)?.let { listener ->
-                val matrixArray = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
-                frameMatrix.getValues(matrixArray)
+                frameMatrix.getValues(clickMatrixValues)
                 listener.onResponseArea(
                     imageKey,
-                    matrixArray[2].toInt(),
-                    matrixArray[5].toInt(),
-                    (drawingBitmap.width * matrixArray[0] + matrixArray[2]).toInt(),
-                    (drawingBitmap.height * matrixArray[4] + matrixArray[5]).toInt()
+                    clickMatrixValues[2].toInt(),
+                    clickMatrixValues[5].toInt(),
+                    (imageWidth * clickMatrixValues[0] + clickMatrixValues[2]).toInt(),
+                    (imageHeight * clickMatrixValues[4] + clickMatrixValues[5]).toInt()
                 )
             }
         }
-        drawTextOnBitmap(canvas, drawingBitmap, sprite, frameMatrix)
+        drawTextOnBitmap(canvas, imageWidth, imageHeight, sprite, frameMatrix)
+    }
+
+    private fun drawAnimatedImage(
+        dynamicAnimatedImage: SVGADynamicImage,
+        canvas: Canvas,
+        sprite: SVGADrawerSprite,
+        frameMatrix: Matrix,
+        paint: Paint,
+        frameIndex: Int
+    ) {
+        val layoutWidth = sprite.frameEntity.layout.width.toFloat()
+        val layoutHeight = sprite.frameEntity.layout.height.toFloat()
+        if (layoutWidth <= 0f || layoutHeight <= 0f) {
+            return
+        }
+        val scale = maxOf(
+            layoutWidth / dynamicAnimatedImage.width.toFloat(),
+            layoutHeight / dynamicAnimatedImage.height.toFloat()
+        )
+        val offsetX = (layoutWidth - dynamicAnimatedImage.width * scale) / 2f
+        val offsetY = (layoutHeight - dynamicAnimatedImage.height * scale) / 2f
+        val imageMatrix = this.sharedValues.sharedMatrix2()
+        imageMatrix.postScale(scale, scale)
+        imageMatrix.postTranslate(offsetX, offsetY)
+
+        val saveCount = canvas.save()
+        canvas.concat(frameMatrix)
+        canvas.clipRect(0f, 0f, layoutWidth, layoutHeight)
+        sprite.frameEntity.maskPath?.let { maskPath ->
+            val path = this.sharedValues.sharedPath()
+            maskPath.buildPath(path)
+            canvas.clipPath(path)
+        }
+        dynamicAnimatedImage.draw(canvas, imageMatrix, paint, frameIndex, videoItem.FPS)
+        canvas.restoreToCount(saveCount)
     }
 
     private fun drawTextOnBitmap(
         canvas: Canvas,
-        drawingBitmap: Bitmap,
+        drawingBitmapWidth: Int,
+        drawingBitmapHeight: Int,
         sprite: SVGADrawerSprite,
         frameMatrix: Matrix
     ) {
         if (dynamicItem.isTextDirty) {
-            this.drawTextCache.clear()
+            clearTextBitmapCaches()
             dynamicItem.isTextDirty = false
         }
         val imageKey = sprite.imageKey ?: return
@@ -298,38 +498,50 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 drawTextCache[imageKey]?.let {
                     textBitmap = it
                 } ?: kotlin.run {
-                    var bitmapWidth = drawingBitmap.width
-                    var textDrawStart = drawingBitmap.width / 2f
+                    var bitmapWidth = drawingBitmapWidth
+                    var textDrawStart = drawingBitmapWidth / 2f
+                    val originalTextAlign = drawingTextPaint.textAlign
+                    var restoreTextAlign = false
                     if (scrollSpeed > 0) {
                         val textWidth = drawingTextPaint.measureText(drawingText)
-                        if (textWidth > drawingBitmap.width) {
-                            val fm = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
-                            frameMatrix.getValues(fm)
-                            bitmapWidth =
-                                (textWidth.toInt() + dynamicItem.srcollTextSpace * videoItem.videoSize.width * fm[0] / canvas.width).toInt()
+                        if (textWidth > drawingBitmapWidth) {
+                            bitmapWidth = safeScrollTextBitmapWidth(
+                                canvas,
+                                drawingBitmapHeight,
+                                frameMatrix,
+                                textWidth
+                            )
                             textDrawStart = 0f
                             drawingTextPaint.textAlign = Paint.Align.LEFT
+                            restoreTextAlign = true
                         }
                     }
-                    textBitmap = Bitmap.createBitmap(
-                        bitmapWidth,
-                        drawingBitmap.height,
-                        Bitmap.Config.ARGB_8888
-                    ).apply {
-                        val drawRect = Rect(0, 0, bitmapWidth, drawingBitmap.height)
-                        val textCanvas = Canvas(this)
-                        drawingTextPaint.isAntiAlias = true
-                        val fontMetrics = drawingTextPaint.getFontMetrics();
-                        val top = fontMetrics.top
-                        val bottom = fontMetrics.bottom
-                        val baseLineY = drawRect.centerY() - top / 2 - bottom / 2
-                        textCanvas.drawText(
-                            drawingText,
-                            textDrawStart,
-                            baseLineY,
-                            drawingTextPaint
-                        );
-                        drawTextCache.put(imageKey, this)
+                    if (bitmapWidth > 0 && drawingBitmapHeight > 0) {
+                        textBitmap = createTempBitmap(
+                            bitmapWidth,
+                            drawingBitmapHeight,
+                            Bitmap.Config.ARGB_8888,
+                            canvas,
+                            "dynamic text"
+                        )?.apply {
+                            val drawRect = Rect(0, 0, width, height)
+                            val textCanvas = Canvas(this)
+                            drawingTextPaint.isAntiAlias = true
+                            val fontMetrics = drawingTextPaint.getFontMetrics();
+                            val top = fontMetrics.top
+                            val bottom = fontMetrics.bottom
+                            val baseLineY = drawRect.centerY() - top / 2 - bottom / 2
+                            textCanvas.drawText(
+                                drawingText,
+                                textDrawStart,
+                                baseLineY,
+                                drawingTextPaint
+                            );
+                            cacheTextBitmap(imageKey, this)
+                        }
+                    }
+                    if (restoreTextAlign) {
+                        drawingTextPaint.textAlign = originalTextAlign
                     }
                 }
             }
@@ -340,26 +552,38 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 textBitmap = it
             } ?: kotlin.run {
                 it.paint.isAntiAlias = true
-                var bitmapWidth = drawingBitmap.width
+                var bitmapWidth = drawingBitmapWidth
+                val originalTextAlign = it.paint.textAlign
+                var restoreTextAlign = false
                 if (scrollSpeed > 0) {
                     val textWidth = it.paint.measureText(it.text, 0, it.text.length)
-                    if (textWidth > drawingBitmap.width) {
-                        val fm = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
-                        frameMatrix.getValues(fm)
-                        bitmapWidth =
-                            (textWidth.toInt() + dynamicItem.srcollTextSpace * videoItem.videoSize.width * fm[0] / canvas.width).toInt()
+                    if (textWidth > drawingBitmapWidth) {
+                        bitmapWidth = safeScrollTextBitmapWidth(
+                            canvas,
+                            drawingBitmapHeight,
+                            frameMatrix,
+                            textWidth
+                        )
                         it.paint.textAlign = Paint.Align.LEFT
+                        restoreTextAlign = true
                     }
                 }
-                textBitmap = Bitmap.createBitmap(
-                    bitmapWidth,
-                    drawingBitmap.height,
-                    Bitmap.Config.ARGB_8888
-                ).apply {
-                    val textCanvas = Canvas(this)
-                    textCanvas.translate(0f, ((drawingBitmap.height - it.height) / 2).toFloat())
-                    it.draw(textCanvas)
-                    drawTextCache.put(imageKey, this)
+                if (bitmapWidth > 0 && drawingBitmapHeight > 0) {
+                    textBitmap = createTempBitmap(
+                        bitmapWidth,
+                        drawingBitmapHeight,
+                        Bitmap.Config.ARGB_8888,
+                        canvas,
+                        "boring layout text"
+                    )?.apply {
+                        val textCanvas = Canvas(this)
+                        textCanvas.translate(0f, ((drawingBitmapHeight - it.height) / 2).toFloat())
+                        it.draw(textCanvas)
+                        cacheTextBitmap(imageKey, this)
+                    }
+                }
+                if (restoreTextAlign) {
+                    it.paint.textAlign = originalTextAlign
                 }
             }
         }
@@ -369,19 +593,37 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 textBitmap = it
             } ?: kotlin.run {
                 it.paint.isAntiAlias = true
-                var bitmapWidth = drawingBitmap.width
+                var bitmapWidth = drawingBitmapWidth
+                val originalTextAlign = it.paint.textAlign
+                var restoreTextAlign = false
                 if (scrollSpeed > 0) {
                     val textWidth = it.paint.measureText(it.text, 0, it.text.length)
-                    if (textWidth > drawingBitmap.width) {
-                        val fm = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
-                        frameMatrix.getValues(fm)
-                        bitmapWidth =
-                            (textWidth.toInt() + dynamicItem.srcollTextSpace * videoItem.videoSize.width * fm[0] / canvas.width).toInt()
+                    if (textWidth > drawingBitmapWidth) {
+                        bitmapWidth = safeScrollTextBitmapWidth(
+                            canvas,
+                            drawingBitmapHeight,
+                            frameMatrix,
+                            textWidth
+                        )
                         it.paint.textAlign = Paint.Align.LEFT
+                        restoreTextAlign = true
                     }
                 }
-                var layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    var lineMax = try {
+                bitmapWidth = safeTempBitmapWidth(
+                    bitmapWidth,
+                    drawingBitmapHeight,
+                    Bitmap.Config.ARGB_8888,
+                    canvas,
+                    "static layout text"
+                )
+                if (bitmapWidth <= 0) {
+                    if (restoreTextAlign) {
+                        it.paint.textAlign = originalTextAlign
+                    }
+                    return@run
+                }
+                val layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val lineMax = try {
                         val field =
                             StaticLayout::class.java.getDeclaredField("mMaximumVisibleLineCount")
                         field.isAccessible = true
@@ -408,15 +650,22 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                         false
                     )
                 }
-                textBitmap = Bitmap.createBitmap(
-                    bitmapWidth,
-                    drawingBitmap.height,
-                    Bitmap.Config.ARGB_8888
-                )?.apply {
-                    val textCanvas = Canvas(this)
-                    textCanvas.translate(0f, ((drawingBitmap.height - layout.height) / 2).toFloat())
-                    layout.draw(textCanvas)
-                    drawTextCache.put(imageKey, this)
+                if (bitmapWidth > 0 && drawingBitmapHeight > 0) {
+                    textBitmap = createTempBitmap(
+                        bitmapWidth,
+                        drawingBitmapHeight,
+                        Bitmap.Config.ARGB_8888,
+                        canvas,
+                        "static layout text"
+                    )?.apply {
+                        val textCanvas = Canvas(this)
+                        textCanvas.translate(0f, ((drawingBitmapHeight - layout.height) / 2).toFloat())
+                        layout.draw(textCanvas)
+                        cacheTextBitmap(imageKey, this)
+                    }
+                }
+                if (restoreTextAlign) {
+                    it.paint.textAlign = originalTextAlign
                 }
             }
         }
@@ -424,138 +673,102 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             val paint = this.sharedValues.sharedPaint()
             paint.isAntiAlias = videoItem.antiAlias
             paint.alpha = (sprite.frameEntity.alpha * 255).toInt()
-            if (sprite.frameEntity.maskPath != null) {
-                val maskPath = sprite.frameEntity.maskPath ?: return@let
-                canvas.save()
-                canvas.concat(frameMatrix)
-                canvas.clipRect(0, 0, drawingBitmap.width, drawingBitmap.height)
-                val bitmapShader =
-                    BitmapShader(textBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-                paint.shader = bitmapShader
+            paint.isFilterBitmap = videoItem.antiAlias
+            if (drawingBitmapWidth <= 0 || drawingBitmapHeight <= 0) return@let
+            val saveCount = canvas.save()
+            canvas.concat(frameMatrix)
+            canvas.clipRect(0f, 0f, drawingBitmapWidth.toFloat(), drawingBitmapHeight.toFloat())
+            sprite.frameEntity.maskPath?.let { maskPath ->
                 val path = this.sharedValues.sharedPath()
                 maskPath.buildPath(path)
-                canvas.drawPath(path, paint)
-                canvas.restore()
+                canvas.clipPath(path)
+            }
+            if (TextScrollTimeline.isActive(textBitmap.width, drawingBitmapWidth, scrollSpeed)) {
+                hasActiveScrollingText = true
+                drawScrollingTextBitmap(
+                    canvas,
+                    imageKey,
+                    textBitmap,
+                    drawingBitmapWidth,
+                    drawingBitmapHeight,
+                    frameMatrix,
+                    paint,
+                    scrollSpeed,
+                )
             } else {
-                paint.isFilterBitmap = videoItem.antiAlias
-                if (textBitmap.width > drawingBitmap.width) {
-                    val gradientBitmap = drawTextGradientCache[imageKey] ?: kotlin.run {
-                        Bitmap.createBitmap(
-                            drawingBitmap.width,
-                            drawingBitmap.height,
-                            Bitmap.Config.ARGB_8888
-                        ).apply {
-                            val tp = Paint()
-                            tp.shader = LinearGradient(
-                                0f,
-                                0f,
-                                drawingBitmap.width.toFloat(),
-                                0f,
-                                intArrayOf(
-                                    Color.TRANSPARENT,
-                                    Color.BLACK,
-                                    Color.BLACK,
-                                    Color.TRANSPARENT
-                                ),
-                                floatArrayOf(0.0f, 0.2f, 0.8f, 1f),
-                                Shader.TileMode.CLAMP
-                            )
-                            val tCanvas = Canvas(this)
-                            tCanvas.drawPaint(tp)
-                            drawTextGradientCache[imageKey] = this
-                        }
-                    }
-                    var textScrollX = 0f
-                    val drawingBitmapWidth = drawingBitmap.width
-                    val fm = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
-                    frameMatrix.getValues(fm)
-                    val startX = fm[2]
-                    val startY = fm[5]
-                    val scaleX = fm[0]
-                    val scaleY = fm[4]
-                    val dstWidth = drawingBitmapWidth * scaleX
-                    val dstHeight = drawingBitmap.height * scaleY
-                    var speed = scrollTextSpeed[imageKey] ?: -1f
-                    if (speed < 0) {
-                        val canvasWidth = canvas.width
-                        val videoWidth = videoItem.videoSize.width
-                        speed = ((dynamicItem.dynamicScrollTextSpeed[imageKey]
-                            ?: 10f) * videoWidth * scaleX / canvasWidth.toFloat() / videoItem.FPS).toFloat()
-                        scrollTextSpeed[imageKey] = speed
-                    }
-                    textScrollX = ((scrollTextPosition[imageKey] ?: 0f) + speed).toFloat()
-                    if (textScrollX > textBitmap.width * 2) {
-                        textScrollX = 0f
-                    }
-                    scrollTextPosition[imageKey] = textScrollX
-                    val textScrollXTwo =
-                        textScrollX
-                    var textScrollXOne = textScrollXTwo
-                    if (textScrollXOne >= textBitmap.width * 2 - drawingBitmapWidth) {
-                        textScrollXOne =
-                            (textScrollXOne - (textBitmap.width * 2 - drawingBitmapWidth)) - drawingBitmapWidth + 1
-                    }
+                canvas.drawBitmap(textBitmap, 0f, 0f, paint)
+            }
+            canvas.restoreToCount(saveCount)
+        }
+    }
 
-                    val saveLayer = canvas.saveLayer(
-                        0f,
-                        0f,
-                        canvas.width.toFloat(),
-                        canvas.height.toFloat(),
-                        null
-                    )
-                    canvas.drawBitmap(
-                        gradientBitmap, Rect(
-                            0,
-                            0,
-                            gradientBitmap.width,
-                            gradientBitmap.height
-                        ),
-                        RectF(
-                            startX,
-                            startY,
-                            startX + dstWidth,
-                            startY + dstHeight
-                        ), null
-                    )
-                    paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN);
-                    canvas.drawBitmap(
-                        textBitmap,
-                        Rect(
-                            (0 + textScrollXOne).toInt(),
-                            0,
-                            (drawingBitmapWidth + textScrollXOne).toInt(),
-                            textBitmap.height
-                        ),
-                        RectF(
-                            startX,
-                            startY - 1,
-                            startX + dstWidth,
-                            startY + dstHeight + 1
-                        ),
-                        paint
-                    )
-                    canvas.drawBitmap(
-                        textBitmap,
-                        Rect(
-                            (textScrollXTwo - textBitmap.width).toInt(),
-                            0,
-                            (drawingBitmapWidth + textScrollXTwo - textBitmap.width).toInt(),
-                            textBitmap.height
-                        ),
-                        Rect(
-                            startX.toInt(),
-                            startY.toInt() - 1,
-                            (startX + dstWidth).toInt(),
-                            (startY + dstHeight).toInt() + 1
-                        ),
-                        paint
-                    )
-                    canvas.restoreToCount(saveLayer)
-                } else {
-                    canvas.drawBitmap(textBitmap, frameMatrix, paint)
-                }
+    private fun drawScrollingTextBitmap(
+        canvas: Canvas,
+        imageKey: String,
+        textBitmap: Bitmap,
+        drawingBitmapWidth: Int,
+        drawingBitmapHeight: Int,
+        frameMatrix: Matrix,
+        paint: Paint,
+        configuredSpeed: Float,
+    ) {
+        frameMatrix.getValues(matrixValues)
+        val pixelsPerSecond = configuredSpeed *
+            videoItem.videoSize.width.toFloat() *
+            mappedXScale(matrixValues) /
+            viewportWidth.toFloat()
+        val offset = scrollTimeline.offsetFor(
+            imageKey,
+            textBitmap.width.toFloat(),
+            pixelsPerSecond,
+            frameTimeNanos,
+        )
+        val shader = scrollingTextShader(imageKey, textBitmap, drawingBitmapWidth)
+        val shaderMatrix = sharedValues.sharedMatrix3()
+        shaderMatrix.setTranslate(-offset, 0f)
+        shader.bitmapShader.setLocalMatrix(shaderMatrix)
+        paint.shader = shader.composedShader
+        canvas.drawRect(
+            0f,
+            0f,
+            drawingBitmapWidth.toFloat(),
+            drawingBitmapHeight.toFloat(),
+            paint,
+        )
+        paint.shader = null
+    }
+
+    private fun scrollingTextShader(
+        imageKey: String,
+        textBitmap: Bitmap,
+        drawingBitmapWidth: Int,
+    ): ScrollingTextShader {
+        scrollingTextShaders[imageKey]?.let {
+            if (it.bitmap === textBitmap && it.viewportWidth == drawingBitmapWidth) {
+                return it
             }
         }
+        val bitmapShader = BitmapShader(
+            textBitmap,
+            Shader.TileMode.REPEAT,
+            Shader.TileMode.CLAMP,
+        )
+        val fadeRatio = (24f / drawingBitmapWidth.toFloat()).coerceIn(0.08f, 0.18f)
+        val fadeShader = LinearGradient(
+            0f,
+            0f,
+            drawingBitmapWidth.toFloat(),
+            0f,
+            intArrayOf(Color.TRANSPARENT, Color.BLACK, Color.BLACK, Color.TRANSPARENT),
+            floatArrayOf(0f, fadeRatio, 1f - fadeRatio, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        return ScrollingTextShader(
+            textBitmap,
+            drawingBitmapWidth,
+            bitmapShader,
+            ComposeShader(bitmapShader, fadeShader, PorterDuff.Mode.DST_IN),
+        ).also { scrollingTextShaders[imageKey] = it }
     }
 
     private fun drawShape(sprite: SVGADrawerSprite, canvas: Canvas) {
@@ -688,23 +901,77 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         val imageKey = sprite.imageKey ?: return
         dynamicItem.dynamicDrawer[imageKey]?.let {
             val frameMatrix = shareFrameMatrix(sprite.frameEntity.transform)
-            canvas.save()
-            canvas.concat(frameMatrix)
-            it.invoke(canvas, frameIndex)
-            canvas.restore()
+            val saveCount = canvas.save()
+            try {
+                canvas.concat(frameMatrix)
+                it.invoke(canvas, frameIndex)
+            } catch (error: OutOfMemoryError) {
+                LogUtils.error("SVGACanvasDrawer", error)
+            } catch (error: Exception) {
+                LogUtils.error("SVGACanvasDrawer", error)
+            } finally {
+                canvas.restoreToCount(saveCount)
+            }
         }
         dynamicItem.dynamicDrawerSized[imageKey]?.let {
+            val layoutWidth = sprite.frameEntity.layout.width
+            val layoutHeight = sprite.frameEntity.layout.height
+            if (!isSafeDynamicDrawerSize(layoutWidth, layoutHeight, canvas, imageKey)) {
+                return@let
+            }
             val frameMatrix = shareFrameMatrix(sprite.frameEntity.transform)
-            canvas.save()
-            canvas.concat(frameMatrix)
-            it.invoke(
-                canvas,
-                frameIndex,
-                sprite.frameEntity.layout.width.toInt(),
-                sprite.frameEntity.layout.height.toInt()
-            )
-            canvas.restore()
+            val saveCount = canvas.save()
+            try {
+                canvas.concat(frameMatrix)
+                it.invoke(
+                    canvas,
+                    frameIndex,
+                    layoutWidth.toInt(),
+                    layoutHeight.toInt()
+                )
+            } catch (error: OutOfMemoryError) {
+                LogUtils.error("SVGACanvasDrawer", error)
+            } catch (error: Exception) {
+                LogUtils.error("SVGACanvasDrawer", error)
+            } finally {
+                canvas.restoreToCount(saveCount)
+            }
         }
+    }
+
+    private fun isSafeDynamicDrawerSize(
+        width: Double,
+        height: Double,
+        canvas: Canvas,
+        imageKey: String
+    ): Boolean {
+        if (!java.lang.Double.isFinite(width) || !java.lang.Double.isFinite(height)) {
+            LogUtils.warn(msg = "Skip dynamic drawer $imageKey, non-finite size ${width}x${height}.")
+            return false
+        }
+        val intWidth = width.toInt()
+        val intHeight = height.toInt()
+        if (intWidth <= 0 || intHeight <= 0) {
+            LogUtils.warn(msg = "Skip dynamic drawer $imageKey, invalid size ${intWidth}x${intHeight}.")
+            return false
+        }
+        val maxCanvasWidth = canvas.maximumBitmapWidth
+            .takeIf { it > 0 }
+            ?: DEFAULT_MAX_TEMP_BITMAP_SIZE
+        val maxCanvasHeight = canvas.maximumBitmapHeight
+            .takeIf { it > 0 }
+            ?: DEFAULT_MAX_TEMP_BITMAP_SIZE
+        if (intWidth > maxCanvasWidth || intHeight > maxCanvasHeight) {
+            LogUtils.warn(
+                msg = "Skip dynamic drawer $imageKey, size ${intWidth}x${intHeight} exceeds canvas limit ${maxCanvasWidth}x${maxCanvasHeight}."
+            )
+            return false
+        }
+        if (intWidth.toLong() * intHeight.toLong() * bytesPerPixel(Bitmap.Config.ARGB_8888).toLong() > MAX_TEMP_BITMAP_BYTES) {
+            LogUtils.warn(msg = "Skip dynamic drawer $imageKey, size ${intWidth}x${intHeight} exceeds memory budget.")
+            return false
+        }
+        return true
     }
 
     class ShareValues {
@@ -714,6 +981,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         private val sharedPath2 = Path()
         private val sharedMatrix = Matrix()
         private val sharedMatrix2 = Matrix()
+        private val sharedMatrix3 = Matrix()
 
         private val shareMattePaint = Paint()
         private var shareMatteCanvas: Canvas? = null
@@ -744,30 +1012,67 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
             return sharedMatrix2
         }
 
+        fun sharedMatrix3(): Matrix {
+            sharedMatrix3.reset()
+            return sharedMatrix3
+        }
+
         fun shareMattePaint(): Paint {
             shareMattePaint.setXfermode(PorterDuffXfermode(PorterDuff.Mode.DST_IN))
             return shareMattePaint
         }
 
-        fun sharedMatteBitmap(): Bitmap {
-            return sharedMatteBitmap as Bitmap
+        fun sharedMatteBitmap(): Bitmap? {
+            return sharedMatteBitmap
         }
 
-        fun shareMatteCanvas(width: Int, height: Int): Canvas {
-            if (shareMatteCanvas == null) {
-                sharedMatteBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ALPHA_8)
-//                shareMatteCanvas = Canvas(sharedMatteBitmap)
+        fun shareMatteCanvas(width: Int, height: Int): Canvas? {
+            if (width <= 0 || height <= 0) {
+                LogUtils.warn(msg = "Skip matte bitmap, invalid size ${width}x${height}.")
+                return null
             }
-//            val matteCanvas = shareMatteCanvas as Canvas
-//            matteCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-//            return matteCanvas
-            return Canvas(
-                sharedMatteBitmap ?: Bitmap.createBitmap(
-                    width,
-                    height,
-                    Bitmap.Config.ALPHA_8
-                )
-            )
+            if (width > DEFAULT_MAX_TEMP_BITMAP_SIZE || height > DEFAULT_MAX_TEMP_BITMAP_SIZE) {
+                LogUtils.warn(msg = "Skip matte bitmap, size ${width}x${height} exceeds limit.")
+                return null
+            }
+            if (width.toLong() * height.toLong() > MAX_TEMP_BITMAP_BYTES) {
+                LogUtils.warn(msg = "Skip matte bitmap, size ${width}x${height} exceeds memory budget.")
+                return null
+            }
+            val bitmap = sharedMatteBitmap
+            if (
+                bitmap == null ||
+                bitmap.isRecycled ||
+                bitmap.width != width ||
+                bitmap.height != height
+            ) {
+                try {
+                    sharedMatteBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ALPHA_8)
+                    shareMatteCanvas = Canvas(sharedMatteBitmap!!)
+                } catch (error: OutOfMemoryError) {
+                    LogUtils.error("SVGACanvasDrawer", error)
+                    sharedMatteBitmap = null
+                    shareMatteCanvas = null
+                    return null
+                } catch (error: IllegalArgumentException) {
+                    LogUtils.error("SVGACanvasDrawer", error)
+                    sharedMatteBitmap = null
+                    shareMatteCanvas = null
+                    return null
+                }
+            }
+            shareMatteCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+            return shareMatteCanvas
+        }
+
+        fun clear() {
+            sharedMatteBitmap?.let {
+                if (!it.isRecycled) {
+                    it.recycle()
+                }
+            }
+            sharedMatteBitmap = null
+            shareMatteCanvas = null
         }
     }
 
@@ -777,12 +1082,12 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
         private var canvasHeight: Int = 0
         private val cache = HashMap<SVGAVideoShapeEntity, Path>()
 
-        fun onSizeChanged(canvas: Canvas) {
-            if (this.canvasWidth != canvas.width || this.canvasHeight != canvas.height) {
+        fun onSizeChanged(viewportWidth: Int, viewportHeight: Int) {
+            if (this.canvasWidth != viewportWidth || this.canvasHeight != viewportHeight) {
                 this.cache.clear()
             }
-            this.canvasWidth = canvas.width
-            this.canvasHeight = canvas.height
+            this.canvasWidth = viewportWidth
+            this.canvasHeight = viewportHeight
         }
 
         fun buildPath(shape: SVGAVideoShapeEntity): Path {
@@ -792,6 +1097,10 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
                 this.cache[shape] = path
             }
             return this.cache[shape]!!
+        }
+
+        fun clear() {
+            this.cache.clear()
         }
 
     }

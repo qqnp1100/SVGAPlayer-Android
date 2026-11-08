@@ -1,0 +1,396 @@
+{
+  "date": "2026-10-16",
+  "review": "Follow-up concurrency, cancellation and cleanup audit of the inBitmap prefetch fix",
+  "version": "Uncommitted workspace fix after follow-up cancellation and immediate-recycling changes",
+  "baselineCommit": "6449b96cf759a11e9e9fbc79afd82ebca9d99319",
+  "device": {
+    "device": "CTR-AL20",
+    "api": 31,
+    "android": "12",
+    "abis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ]
+  },
+  "resource": {
+    "url": "https://pic.vchat-onlie.com/lrLbLafGg0G_eN_gWomorqlJrxWl?imageslim",
+    "sha256": "09e6f2c2495d5731db19d85944bdf1e0cc00fb1299dd1fad17fb12561483887b",
+    "fileBytes": 17854518,
+    "sourceWidth": 449.0,
+    "sourceHeight": 800.0,
+    "frames": 150,
+    "fps": 30,
+    "imageEntries": 150,
+    "audioTracks": 0,
+    "audioKeys": [],
+    "singleUseImages": 126,
+    "repeatUseImages": 23,
+    "invisibleImages": 1,
+    "reusableImages": 126,
+    "viewportWidth": 750,
+    "viewportHeight": 1334,
+    "visibleDecodedBytes": 214083200,
+    "deferredGroups": [
+      {
+        "width": 449,
+        "height": 800,
+        "count": 126
+      }
+    ]
+  },
+  "findingsFixed": [
+    {
+      "issue": "A coroutine cancelled while waiting on decodeLock still decoded and published its frame after acquiring the monitor",
+      "fix": "Pass the request CoroutineContext into preparation; check cancellation after acquiring decodeLock, before each image, after native decode and before publication; recycle cancelled results and roll back their reservations; do not cache CancellationException as a malformed-image failure",
+      "regressionTest": "cancellationWhileWaitingForTheDecoderSkipsTheNativeDecode"
+    },
+    {
+      "issue": "close dropped all current Bitmap references, including never-drawn prefetched pixels, leaving safe-to-release native allocations to GC",
+      "fix": "Recycle private pixels immediately unless referenced by a hardware display list or an in-progress draw; preserve shared eager pixels; keep close idempotent",
+      "regressionTests": [
+        "closingRecyclesUnshownPrefetchWithoutRecyclingSharedImages",
+        "closingKeepsPixelsPinnedByAnInProgressDraw"
+      ],
+      "additionalAssertions": [
+        "Close cancels and completes only its own prefetch worker",
+        "The current hardware frame remains unrecycled after clear"
+      ]
+    }
+  ],
+  "verification": {
+    "newRegressionTestsBeforeFix": {
+      "run": 3,
+      "failures": 3
+    },
+    "libraryUnit": {
+      "tests": 36,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "deviceSuite": {
+      "run": 43,
+      "passed": 42,
+      "failures": 1,
+      "inBitmapTestsPassed": 21,
+      "passedClasses": {
+        "SvgaInBitmapTest": 21,
+        "SvgaViewConcurrencyTest": 4,
+        "SvgaConcurrentDrawingTest": 6,
+        "SvgaBitmapDecodeTest": 5,
+        "SvgaStaticImageTest": 1,
+        "SvgaViewLoaderTest": 5
+      },
+      "knownBaselineFailure": {
+        "test": "SvgaBitmapDecodeTest.filteringRealAssetsPreservesAllFramesIncludingBitmapMattes",
+        "message": "Invalid image img_122",
+        "cause": "Castle.svga contains MP3 bytes under img_122 without an audio-track reference",
+        "baselineReproduced": true
+      }
+    },
+    "compilation": [
+      "app debug APK",
+      "app instrumentation APK",
+      "svga-glide5 debug Kotlin"
+    ],
+    "diffCheck": "passed"
+  },
+  "offModeAudit": {
+    "decodeAndCacheImplementationChangedByThisReview": false,
+    "checks": [
+      "inBitmap=false resources have no SvgaDeferredImages instance and start no prefetch worker",
+      "Decode-mode cache separation and six simultaneous mixed-mode View loads passed",
+      "Ordinary loading, pending-load replacement, cancellation, reattachment, static image and drawing/clear regressions passed",
+      "Shared playback-clock behavior is unchanged unless resumeAfterBuffering is invoked for a deferred frame"
+    ]
+  },
+  "benchmarkMethod": {
+    "passes": 2,
+    "freshInstrumentationProcessPerVersionAndMode": true,
+    "retainedEngineBetweenPasses": true,
+    "explicitGcBetweenPasses": false,
+    "viewportWidth": 750,
+    "viewportHeight": 1334,
+    "bitmapConfig": "ARGB_8888",
+    "skipInvisibleImages": false,
+    "iterations": 1,
+    "speed": 1,
+    "heapSamplingIntervalMillis": 200,
+    "pssSamplingIntervalMillis": 500,
+    "pssSource": "/proc/self/smaps_rollup Pss; excludes GPU memtrack",
+    "peakScope": "maximum across load and playback phases and both passes",
+    "bitmapSampling": "onReady and every onDraw; includes ready pixels, decode reservations, hardware retirement and pool",
+    "beforeBitmapPeakUnavailable": false,
+    "comparison": "Latest review fix: false versus true, two consecutive loads per fresh process"
+  },
+  "benchmarkSummary": [
+    {
+      "inBitmap": false,
+      "playMillis": [
+        5025.287966,
+        5024.243488
+      ],
+      "loadMillis": [
+        2045.19375,
+        99.542344
+      ],
+      "drawnDistinctFrames": [
+        150,
+        150
+      ],
+      "eagerImages": 150,
+      "deferredImages": 0,
+      "peakBitmapBytes": 214083204,
+      "peakPssBytes": 465828864,
+      "decodeCount": [
+        1,
+        0
+      ],
+      "strongCacheHits": [
+        0,
+        0
+      ],
+      "weakCacheHits": [
+        0,
+        1
+      ]
+    },
+    {
+      "inBitmap": true,
+      "playMillis": [
+        5027.145258,
+        5024.114425
+      ],
+      "loadMillis": [
+        1404.569323,
+        83.329531
+      ],
+      "drawnDistinctFrames": [
+        150,
+        150
+      ],
+      "eagerImages": 23,
+      "deferredImages": 126,
+      "peakBitmapBytes": 41667200,
+      "peakPssBytes": 229738496,
+      "decodeCount": [
+        1,
+        0
+      ],
+      "strongCacheHits": [
+        0,
+        0
+      ],
+      "weakCacheHits": [
+        0,
+        1
+      ]
+    }
+  ],
+  "bitmapPeakReductionPercent": 80.53691311533248,
+  "pssPeakReductionPercent": 50.6817817111479,
+  "rawBenchmarkRows": [
+    {
+      "inBitmap": false,
+      "rows": [
+        {
+          "pass": 1,
+          "frames": 150,
+          "fps": 30,
+          "eagerImages": 150,
+          "deferredImages": 0,
+          "sourceWidth": 449,
+          "sourceHeight": 800,
+          "nominalPlayMillis": 5000,
+          "loadMillis": 2045.19375,
+          "actualPlayMillis": 5025.287966,
+          "totalMillis": 7070.481716,
+          "loadCpuMillis": 2523,
+          "playCpuMillis": 3635,
+          "loadCpuPercent": 123.3623953720766,
+          "playCpuPercent": 72.33416322793073,
+          "samplerCpuMillis": 291.526099,
+          "baselinePssBytes": 100108288,
+          "baselineJavaBytes": 2114248,
+          "baselineNativeBytes": 12160792,
+          "loadPeak": {
+            "pssBytes": 465828864,
+            "javaBytes": 35735096,
+            "nativeBytes": 247397576,
+            "heapBytes": 283132672,
+            "heapSamples": 12,
+            "pssSamples": 5
+          },
+          "playPeak": {
+            "pssBytes": 455481344,
+            "javaBytes": 36662320,
+            "nativeBytes": 247635576,
+            "heapBytes": 284137768,
+            "heapSamples": 24,
+            "pssSamples": 7
+          },
+          "drawnDistinctFrames": 150,
+          "peakBitmapBytes": 214083204,
+          "maxDrawGapMillis": 43.573542,
+          "firstDrawToLastDrawMillis": 4985.004633,
+          "decodeCount": 1,
+          "strongCacheHits": 0,
+          "weakCacheHits": 0
+        },
+        {
+          "pass": 2,
+          "frames": 150,
+          "fps": 30,
+          "eagerImages": 150,
+          "deferredImages": 0,
+          "sourceWidth": 449,
+          "sourceHeight": 800,
+          "nominalPlayMillis": 5000,
+          "loadMillis": 99.542344,
+          "actualPlayMillis": 5024.243488,
+          "totalMillis": 5123.785832,
+          "loadCpuMillis": 131,
+          "playCpuMillis": 4205,
+          "loadCpuPercent": 131.60228575690363,
+          "playCpuPercent": 83.69419217128515,
+          "samplerCpuMillis": 372.261197,
+          "baselinePssBytes": 454526976,
+          "baselineJavaBytes": 36742384,
+          "baselineNativeBytes": 247503656,
+          "loadPeak": {
+            "pssBytes": 454526976,
+            "javaBytes": 36876488,
+            "nativeBytes": 247566712,
+            "heapBytes": 284443200,
+            "heapSamples": 2,
+            "pssSamples": 1
+          },
+          "playPeak": {
+            "pssBytes": 455896064,
+            "javaBytes": 37810376,
+            "nativeBytes": 247677272,
+            "heapBytes": 285213104,
+            "heapSamples": 24,
+            "pssSamples": 8
+          },
+          "drawnDistinctFrames": 150,
+          "peakBitmapBytes": 214083204,
+          "maxDrawGapMillis": 57.196927,
+          "firstDrawToLastDrawMillis": 4980.048592,
+          "decodeCount": 0,
+          "strongCacheHits": 0,
+          "weakCacheHits": 1
+        }
+      ]
+    },
+    {
+      "inBitmap": true,
+      "rows": [
+        {
+          "pass": 1,
+          "frames": 150,
+          "fps": 30,
+          "eagerImages": 23,
+          "deferredImages": 126,
+          "sourceWidth": 449,
+          "sourceHeight": 800,
+          "nominalPlayMillis": 5000,
+          "loadMillis": 1404.569323,
+          "actualPlayMillis": 5027.145258,
+          "totalMillis": 6431.714581,
+          "loadCpuMillis": 1601,
+          "playCpuMillis": 4321,
+          "loadCpuPercent": 113.98511798481022,
+          "playCpuPercent": 85.95335480158907,
+          "samplerCpuMillis": 194.70689,
+          "baselinePssBytes": 101893120,
+          "baselineJavaBytes": 2113944,
+          "baselineNativeBytes": 12215368,
+          "loadPeak": {
+            "pssBytes": 118853632,
+            "javaBytes": 40426528,
+            "nativeBytes": 49559240,
+            "heapBytes": 89985768,
+            "heapSamples": 8,
+            "pssSamples": 3
+          },
+          "playPeak": {
+            "pssBytes": 229738496,
+            "javaBytes": 41807312,
+            "nativeBytes": 58663032,
+            "heapBytes": 100260608,
+            "heapSamples": 26,
+            "pssSamples": 9
+          },
+          "drawnDistinctFrames": 150,
+          "peakBitmapBytes": 41667200,
+          "maxDrawGapMillis": 41.4725,
+          "firstDrawToLastDrawMillis": 4980.657134,
+          "decodeCount": 1,
+          "strongCacheHits": 0,
+          "weakCacheHits": 0
+        },
+        {
+          "pass": 2,
+          "frames": 150,
+          "fps": 30,
+          "eagerImages": 23,
+          "deferredImages": 126,
+          "sourceWidth": 449,
+          "sourceHeight": 800,
+          "nominalPlayMillis": 5000,
+          "loadMillis": 83.329531,
+          "actualPlayMillis": 5024.114425,
+          "totalMillis": 5107.443956,
+          "loadCpuMillis": 120,
+          "playCpuMillis": 6091,
+          "loadCpuPercent": 144.00657073180935,
+          "playCpuPercent": 121.23529610892571,
+          "samplerCpuMillis": 245.180002,
+          "baselinePssBytes": 227323904,
+          "baselineJavaBytes": 41864104,
+          "baselineNativeBytes": 58389856,
+          "loadPeak": {
+            "pssBytes": 227323904,
+            "javaBytes": 42044376,
+            "nativeBytes": 58389856,
+            "heapBytes": 100253960,
+            "heapSamples": 2,
+            "pssSamples": 1
+          },
+          "playPeak": {
+            "pssBytes": 226367488,
+            "javaBytes": 42232792,
+            "nativeBytes": 58646016,
+            "heapBytes": 99378656,
+            "heapSamples": 25,
+            "pssSamples": 8
+          },
+          "drawnDistinctFrames": 150,
+          "peakBitmapBytes": 41667200,
+          "maxDrawGapMillis": 58.382136,
+          "firstDrawToLastDrawMillis": 4982.451717,
+          "decodeCount": 0,
+          "strongCacheHits": 0,
+          "weakCacheHits": 1
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Native BitmapFactory work already in progress finishes one bitmap before cancellation can discard its result",
+    "Device execution uses Coil; the matching Glide integration was compiled",
+    "PSS sampling excludes GPU memtrack and is not a byte-exact total device-memory peak",
+    "Verification used one Android 12 API 31 device"
+  ],
+  "previousFullPixelComparison": "All 150 frames matched eager software-Canvas pixels in the linked pre-review report; not rerun because this follow-up changes only cancellation/cleanup and passes existing pixel tests",
+  "referenceReport": "2026-10-16-inbitmap-prefetch-real-lrlb.json",
+  "logs": [
+    "/private/tmp/svga-inbitmap-review-before-tests.log",
+    "/private/tmp/svga-inbitmap-review-device-tests.log",
+    "/private/tmp/svga-inbitmap-review-build.log",
+    "/private/tmp/svga-real-lrlb-review-false.log",
+    "/private/tmp/svga-real-lrlb-review-true.log"
+  ]
+}

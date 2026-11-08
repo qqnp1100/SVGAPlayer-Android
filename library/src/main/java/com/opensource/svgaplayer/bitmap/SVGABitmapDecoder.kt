@@ -2,7 +2,7 @@ package com.opensource.svgaplayer.bitmap
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.util.Log
+import android.os.Build
 
 /**
  * Bitmap 解码器
@@ -22,6 +22,19 @@ internal abstract class SVGABitmapDecoder<T> {
         videoWidth: Int,
         videoHeight: Int
     ): Bitmap? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            decodeBitmapWithImageDecoder(
+                data,
+                scaleX,
+                scaleY,
+                reqWidth,
+                reqHeight,
+                videoWidth,
+                videoHeight
+            )?.let {
+                return it
+            }
+        }
         return BitmapFactory.Options().run {
             // 如果期望的宽高是合法的, 则开启检测尺寸模式
             inJustDecodeBounds = (reqWidth > 0 && reqHeight > 0)
@@ -49,5 +62,35 @@ internal abstract class SVGABitmapDecoder<T> {
         }
     }
 
+    private fun decodeBitmapWithImageDecoder(
+        data: T,
+        scaleX: Float,
+        scaleY: Float,
+        reqWidth: Int,
+        reqHeight: Int,
+        videoWidth: Int,
+        videoHeight: Int
+    ): Bitmap? {
+        return onDecodeWithImageDecoder(
+            data,
+            scaleX,
+            scaleY,
+            reqWidth,
+            reqHeight,
+            videoWidth,
+            videoHeight
+        )
+    }
+
     abstract fun onDecode(data: T, ops: BitmapFactory.Options): Bitmap?
+
+    abstract fun onDecodeWithImageDecoder(
+        data: T,
+        scaleX: Float,
+        scaleY: Float,
+        reqWidth: Int,
+        reqHeight: Int,
+        videoWidth: Int,
+        videoHeight: Int
+    ): Bitmap?
 }

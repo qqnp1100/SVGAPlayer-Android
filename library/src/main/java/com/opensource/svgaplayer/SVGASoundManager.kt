@@ -11,6 +11,7 @@ import android.media.SoundPool
 import android.os.Build
 import com.opensource.svgaplayer.utils.log.LogUtils
 import java.io.FileDescriptor
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Author : llk
@@ -23,13 +24,14 @@ import java.io.FileDescriptor
  * 相关文章：Android SoundPool 崩溃问题研究
  * https://zhuanlan.zhihu.com/p/29985198
  */
+@Deprecated("Deprecated since 3.0.0. Modern playback owns a separate SvgaAudioSession for each presentation.")
 object SVGASoundManager {
 
     private val TAG = SVGASoundManager::class.java.simpleName
 
     private var soundPool: SoundPool? = null
 
-    private val soundCallBackMap: MutableMap<Int, SVGASoundCallBack> = mutableMapOf()
+    private val soundCallBackMap: MutableMap<Int, SVGASoundCallBack> = ConcurrentHashMap()
 
     /**
      * 音量设置，范围在 [0, 1] 之间
@@ -48,10 +50,12 @@ object SVGASoundManager {
         fun onComplete()
     }
 
+    @Deprecated("Deprecated since 3.0.0. Modern View/Compose loaders prepare instance audio automatically.")
     fun init() {
         init(20)
     }
 
+    @Deprecated("Deprecated since 3.0.0. Modern View/Compose loaders prepare instance audio automatically.")
     fun init(maxStreams: Int) {
         LogUtils.debug(TAG, "**************** init **************** $maxStreams")
         if (soundPool != null) {
@@ -60,19 +64,23 @@ object SVGASoundManager {
         soundPool = getSoundPool(maxStreams)
         soundPool?.setOnLoadCompleteListener { _, soundId, status ->
             LogUtils.debug(TAG, "SoundPool onLoadComplete soundId=$soundId status=$status")
-            if (status == 0) { //加载该声音成功
-                if (soundCallBackMap.containsKey(soundId)) {
-                    soundCallBackMap[soundId]?.onComplete()
-                }
+            if (status != 0) {
+                LogUtils.error(TAG, "SoundPool load failed, soundId=$soundId status=$status")
+            }
+            if (soundCallBackMap.containsKey(soundId)) {
+                soundCallBackMap[soundId]?.onComplete()
             }
         }
     }
 
+    @Deprecated("Deprecated since 3.0.0. Cancel the SvgaViewHandle or close your SvgaAudioSession to release instance audio.")
     fun release() {
         LogUtils.debug(TAG, "**************** release ****************")
         if (soundCallBackMap.isNotEmpty()) {
             soundCallBackMap.clear()
         }
+        soundPool?.release()
+        soundPool = null
     }
 
     /**
@@ -81,6 +89,7 @@ object SVGASoundManager {
      * @param volume 范围在 [0, 1]
      * @param entity 根据需要控制对应 entity 音量大小，若为空则控制所有正在播放的音频音量
      */
+    @Deprecated("Deprecated since 3.0.0. This controls legacy SoundPool audio only; modern SvgaAudioSession has no volume API.")
     fun setVolume(volume: Float, entity: SVGAVideoEntity? = null) {
         if (!checkInit()) {
             return

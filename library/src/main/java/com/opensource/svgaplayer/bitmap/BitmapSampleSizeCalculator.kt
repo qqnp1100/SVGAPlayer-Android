@@ -18,10 +18,31 @@ internal object BitmapSampleSizeCalculator {
         svgaWidth: Int,
         svgaHeight: Int
     ): Int {
+        return calculate(
+            options.outWidth,
+            options.outHeight,
+            scaleX,
+            scaleY,
+            reqWidth,
+            reqHeight,
+            svgaWidth,
+            svgaHeight
+        )
+    }
 
+    fun calculate(
+        outWidth: Int,
+        outHeight: Int,
+        scaleX: Float,
+        scaleY: Float,
+        reqWidth: Int,
+        reqHeight: Int,
+        svgaWidth: Int,
+        svgaHeight: Int
+    ): Int {
         // Raw height and width of image
-        val height = (options.outHeight * scaleY).toInt()
-        val width = (options.outWidth * scaleX).toInt()
+        val height = outHeight
+        val width = outWidth
         var inSampleSize = 1
 
         if (reqHeight <= 0 || reqWidth <= 0) {
@@ -31,8 +52,8 @@ internal object BitmapSampleSizeCalculator {
             return inSampleSize
         }
 
-        val targetWidth = Math.max(width * reqWidth / svgaWidth, 1)
-        val targetHeight = Math.max(height * reqHeight / svgaHeight, 1)
+        val targetWidth = Math.max((width * kotlin.math.abs(scaleX) * reqWidth / svgaWidth).toInt(), 1)
+        val targetHeight = Math.max((height * kotlin.math.abs(scaleY) * reqHeight / svgaHeight).toInt(), 1)
 
 
         if (height > targetHeight || width > targetWidth) {
@@ -48,5 +69,41 @@ internal object BitmapSampleSizeCalculator {
         }
 
         return inSampleSize
+    }
+
+    fun calculateTargetSize(
+        outWidth: Int,
+        outHeight: Int,
+        scaleX: Float,
+        scaleY: Float,
+        reqWidth: Int,
+        reqHeight: Int,
+        svgaWidth: Int,
+        svgaHeight: Int
+    ): Pair<Int, Int>? {
+        if (outWidth <= 0 || outHeight <= 0) {
+            return null
+        }
+        if (reqHeight <= 0 || reqWidth <= 0) {
+            return null
+        }
+        if (svgaWidth <= 0 || svgaHeight <= 0) {
+            return null
+        }
+        val displayWidth = outWidth * scaleX
+        val displayHeight = outHeight * scaleY
+        val targetWidth = Math.max((displayWidth * reqWidth / svgaWidth).toInt(), 1)
+        val targetHeight = Math.max((displayHeight * reqHeight / svgaHeight).toInt(), 1)
+        val targetScale = Math.max(
+            targetWidth.toFloat() / outWidth.toFloat(),
+            targetHeight.toFloat() / outHeight.toFloat()
+        ).coerceAtMost(1f)
+        if (targetScale >= 1f) {
+            return null
+        }
+        return Pair(
+            Math.max((outWidth * targetScale).toInt(), 1),
+            Math.max((outHeight * targetScale).toInt(), 1)
+        )
     }
 }

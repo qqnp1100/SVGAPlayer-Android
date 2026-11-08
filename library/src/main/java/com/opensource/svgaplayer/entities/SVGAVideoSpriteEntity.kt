@@ -3,63 +3,32 @@ package com.opensource.svgaplayer.entities
 import com.opensource.svgaplayer.proto.SpriteEntity
 import org.json.JSONObject
 
-/**
- * Created by cuiminghui on 2016/10/17.
- */
 internal class SVGAVideoSpriteEntity {
-
     val imageKey: String?
-
     val matteKey: String?
-
+    /** One reference per original frame index, including empty and duplicate frames. */
     val frames: List<SVGAVideoSpriteFrameEntity>
 
-    constructor(obj: JSONObject) {
-        this.imageKey = obj.optString("imageKey")
-        this.matteKey = obj.optString("matteKey")
-        val mutableFrames: MutableList<SVGAVideoSpriteFrameEntity> = mutableListOf()
-        obj.optJSONArray("frames")?.let {
-            for (i in 0 until it.length()) {
-                it.optJSONObject(i)?.let {
-                    val frameItem = SVGAVideoSpriteFrameEntity(it)
-                    if (frameItem.shapes.isNotEmpty()) {
-                        frameItem.shapes.first().let {
-                            if (it.isKeep && mutableFrames.size > 0) {
-                                frameItem.shapes = mutableFrames.last().shapes
-                            }
-                        }
-                    }
-                    mutableFrames.add(frameItem)
-                }
-            }
+    constructor(obj: JSONObject, pool: SvgaFramePool) {
+        imageKey = obj.optString("imageKey")
+        matteKey = obj.optString("matteKey")
+        val array = obj.optJSONArray("frames")
+        val indexed = ArrayList<SVGAVideoSpriteFrameEntity>(array?.length() ?: 0)
+        if (array != null) for (index in 0 until array.length()) {
+            array.optJSONObject(index)?.let { indexed.add(pool.frame(it, indexed.lastOrNull())) }
         }
-        frames = mutableFrames.toList()
+        frames = indexed
     }
 
-    constructor(obj: SpriteEntity) {
-        this.imageKey = obj.imageKey
-        this.matteKey = obj.matteKey
-        var lastFrame: SVGAVideoSpriteFrameEntity? = null
-        frames = obj.frames?.map {
-            val frameItem = SVGAVideoSpriteFrameEntity(it)
-            if (frameItem.shapes.isNotEmpty()) {
-                frameItem.shapes.first().let {
-                    if (it.isKeep) {
-                        lastFrame?.let {
-                            frameItem.shapes = it.shapes
-                        }
-                    }
-                }
-            }
-            lastFrame = frameItem
-            return@map frameItem
-        } ?: listOf()
-
+    constructor(obj: SpriteEntity, pool: SvgaFramePool) {
+        imageKey = obj.imageKey
+        matteKey = obj.matteKey
+        val indexed = ArrayList<SVGAVideoSpriteFrameEntity>(obj.frames.size)
+        obj.frames.forEach { indexed.add(pool.frame(it, indexed.lastOrNull())) }
+        frames = indexed
     }
 
     fun clear() {
-        frames.map {
-            it.clear()
-        }
+        frames.toSet().forEach { it.clear() }
     }
 }
