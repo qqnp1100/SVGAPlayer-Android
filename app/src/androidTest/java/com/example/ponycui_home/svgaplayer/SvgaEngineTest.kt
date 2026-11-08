@@ -64,20 +64,30 @@ class SvgaEngineTest {
     @Test fun concurrentConsumersShareDownloadAndResourceThenEvictionIsSafe() = runBlocking {
         val server = MockWebServer(); server.start()
         val engine = SvgaEngine(context)
+        var phase = "download and decode"
         try {
-            server.enqueue(response().setBodyDelay(300, java.util.concurrent.TimeUnit.MILLISECONDS))
-            val request = SvgaRequest(SvgaSource.Remote(server.url("/shared.svga").toString()), 256, 256)
-            val resources = (0 until 10).map { async { engine.acquire(request) } }.awaitAll()
-            assertEquals(1, server.requestCount); assertEquals(1, engine.decodeCount.get())
-            resources.forEach { assertSame(resources[0], it) }
-            assertSame(resources[0], engine.acquire(request))
-            val first = resources[0].newVideoEntity(); val second = resources[0].newVideoEntity()
-            first.clear(); engine.clearMemory(); engine.clearDisk()
-            assertFalse(second.isRecycleImage())
-            val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
-            resources[0].newRenderer().use { it.draw(Canvas(bitmap), 256, 256, 1, 0) }
-            val pixels = IntArray(256 * 256); bitmap.getPixels(pixels, 0, 256, 0, 0, 256, 256)
-            assertTrue(pixels.any { (it ushr 24) != 0 })
+            withTimeout(20_000) {
+                server.enqueue(response().setBodyDelay(300, java.util.concurrent.TimeUnit.MILLISECONDS))
+                val request = SvgaRequest(SvgaSource.Remote(server.url("/shared.svga").toString()), 256, 256)
+                val resources = (0 until 10).map { async { engine.acquire(request) } }.awaitAll()
+                assertEquals(1, server.requestCount); assertEquals(1, engine.decodeCount.get())
+                resources.forEach { assertSame(resources[0], it) }
+                phase = "memory reuse"
+                assertSame(resources[0], engine.acquire(request))
+                val first = resources[0].newVideoEntity(); val second = resources[0].newVideoEntity()
+                phase = "cache clear"
+                first.clear(); engine.clearMemory(); engine.clearDisk()
+                assertFalse(second.isRecycleImage())
+                phase = "retained resource rendering"
+                val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+                try {
+                    resources[0].newRenderer().use { it.draw(Canvas(bitmap), 256, 256, 1, 0) }
+                    val pixels = IntArray(256 * 256); bitmap.getPixels(pixels, 0, 256, 0, 0, 256, 256)
+                    assertTrue(pixels.any { (it ushr 24) != 0 })
+                } finally { bitmap.recycle() }
+            }
+        } catch (e: TimeoutCancellationException) {
+            throw AssertionError("Concurrent load timed out during $phase: network=${engine.networkRequests.get()}, decode=${engine.decodeCount.get()}", e)
         } finally { engine.close(); server.shutdown() }
     }
 

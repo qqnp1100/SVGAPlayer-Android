@@ -9,17 +9,24 @@ import com.opensource.svgaplayer.bitmap.SvgaImageDecoder
 import com.opensource.svgaplayer.bitmap.SvgaImageSize
 import com.opensource.svgaplayer.drawer.SVGACanvasDrawer
 import com.opensource.svgaplayer.proto.MovieEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import org.json.JSONObject
+import org.json.JSONException
 import java.io.File
 import java.io.FilterInputStream
 import java.io.InputStream
+import java.io.IOException
 import java.util.zip.InflaterInputStream
 import java.util.zip.ZipInputStream
 
 /** Shared animation data and immutable pixels. Mutable pooled pixels belong to presentations. */
 class SvgaResource private constructor(private val data: SVGAVideoEntity) {
+    /** A request budget failure must not invalidate an otherwise intact ZIP cache. */
+    class DecodeBudgetExceededException internal constructor() : IllegalArgumentException("Decoded image budget exceeded")
+    /** Only content failures from an existing directory are eligible for a ZIP rebuild. */
+    class DirectoryDecodeException internal constructor(cause: Exception) : IOException("Invalid SVGA directory", cause)
     val width get() = data.videoSize.width.toInt()
     val height get() = data.videoSize.height.toInt()
     val frames get() = data.frames
@@ -78,7 +85,6 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
             stream.mark(4)
             val zip = stream.read() == 0x50 && stream.read() == 0x4b
             stream.reset()
-            val video: SVGAVideoEntity
             if (zip) {
                 directory.mkdirs()
                 var total = 0L
@@ -105,17 +111,61 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                         archive.closeEntry()
                     }
                 }
-                val binary = File(directory, "movie.binary")
-                video = if (binary.isFile) binary.inputStream().use { SVGAVideoEntity(MovieEntity.ADAPTER.decode(it), directory) }
-                else SVGAVideoEntity(JSONObject(File(directory, "movie.spec").readText()), directory)
-            } else {
-                video = bounded(InflaterInputStream(stream), MAX_EXPANDED_BYTES).use {
-                    SVGAVideoEntity(MovieEntity.ADAPTER.decode(it), directory)
-                }
+                return decodeDirectory(directory, width, height, maxDecodedBytes, decodeOptions, onImageDecodeError)
             }
+            val video = bounded(InflaterInputStream(stream), MAX_EXPANDED_BYTES).use {
+                SVGAVideoEntity(MovieEntity.ADAPTER.decode(it), directory)
+            }
+            return buildResource(video, directory, null, width, height, maxDecodedBytes, decodeOptions, onImageDecodeError)
+        }
+
+        /** Read an immutable expanded ZIP. No files are modified or retained by the returned resource. */
+        suspend fun decodeFromDirectory(directory: File, width: Int = 0, height: Int = 0,
+            maxDecodedBytes: Long = MAX_EXPANDED_BYTES,
+            decodeOptions: SvgaDecodeOptions = SvgaDecodeOptions.defaults,
+            onImageDecodeError: () -> Unit = {}): SvgaResource {
+            try {
+                var files = 0
+                var bytes = 0L
+                val prefix = directory.canonicalPath + File.separator
+                directory.walkTopDown().forEach { file ->
+                    currentCoroutineContext().ensureActive()
+                    if (file != directory) require(file.canonicalPath.startsWith(prefix)) { "Unsafe directory entry" }
+                    if (file.isFile) {
+                        require(++files <= 4096) { "Too many ZIP files" }
+                        bytes += file.length()
+                        require(bytes <= MAX_EXPANDED_BYTES) { "ZIP too large" }
+                    }
+                }
+                return decodeDirectory(directory, width, height, maxDecodedBytes, decodeOptions, onImageDecodeError)
+            } catch (e: CancellationException) { throw e }
+            catch (e: DecodeBudgetExceededException) { throw e }
+            catch (e: IOException) { throw DirectoryDecodeException(e) }
+            catch (e: JSONException) { throw DirectoryDecodeException(e) }
+            catch (e: IllegalArgumentException) { throw DirectoryDecodeException(e) }
+            catch (e: IllegalStateException) { throw DirectoryDecodeException(e) }
+        }
+
+        private suspend fun decodeDirectory(directory: File, width: Int, height: Int, maxDecodedBytes: Long,
+            decodeOptions: SvgaDecodeOptions, onImageDecodeError: () -> Unit): SvgaResource {
+            val binary = File(directory, "movie.binary")
+            val spec = if (!binary.isFile) JSONObject(File(directory, "movie.spec").readText()) else null
+            val video = if (binary.isFile) binary.inputStream().use { SVGAVideoEntity(MovieEntity.ADAPTER.decode(it), directory) }
+                else SVGAVideoEntity(requireNotNull(spec), directory)
+            return buildResource(video, directory, spec?.optJSONObject("images"), width, height, maxDecodedBytes,
+                decodeOptions, onImageDecodeError)
+        }
+
+        private fun checkDecodedBudget(condition: Boolean) {
+            if (!condition) throw DecodeBudgetExceededException()
+        }
+
+        private suspend fun buildResource(video: SVGAVideoEntity, directory: File, json: JSONObject?,
+            width: Int, height: Int, maxDecodedBytes: Long, decodeOptions: SvgaDecodeOptions,
+            onImageDecodeError: () -> Unit): SvgaResource {
+            val job = currentCoroutineContext()
             require(video.frames in 1..100000 && video.FPS in 1..240 &&
                 video.videoSize.width > 0 && video.videoSize.height > 0) { "Invalid SVGA metadata" }
-            val json = if (zip && video.movieItem == null) JSONObject(File(directory, "movie.spec").readText()).optJSONObject("images") else null
             val images = video.movieItem?.images.orEmpty()
             val audioKeys = video.movieItem?.audios.orEmpty().mapNotNull { it.audioKey }.toSet()
             val keys = if (json != null) json.keys().asSequence().toList() else images.keys.toList()
@@ -157,7 +207,7 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                 }
                 if (decodeOptions.progressive) {
                     val reserved = SvgaImageDecoder.sharedByteBudget(opts.outWidth, opts.outHeight, target.first, target.second)
-                    require(reserved <= maxDecodedBytes - pixels) { "Decoded image budget exceeded" }
+                    checkDecodedBudget(reserved <= maxDecodedBytes - pixels)
                     sharedSources[key.removeSuffix(".matte")] = SvgaDeferredImage(
                         file?.readBytes() ?: requireNotNull(bytes), -1,
                         opts.outWidth, opts.outHeight, target.first, target.second, decodeOptions)
@@ -165,14 +215,12 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
                     continue
                 }
                 // RGB_565 is a preference: alpha images can still require four bytes per pixel.
-                require(target.first.toLong() <= (maxDecodedBytes - pixels) / 4 / target.second) {
-                    "Decoded image budget exceeded"
-                }
+                checkDecodedBudget(target.first.toLong() <= (maxDecodedBytes - pixels) / 4 / target.second)
                 val bitmap = requireNotNull(SvgaImageDecoder.decode(file, bytes, opts.outWidth, opts.outHeight,
                     target.first, target.second, decodeOptions)) { "Cannot decode $key" }
                 if (bitmap.allocationByteCount.toLong() > maxDecodedBytes - pixels) {
                     bitmap.recycle()
-                    error("Decoded image budget exceeded")
+                    throw DecodeBudgetExceededException()
                 }
                 pixels += bitmap.allocationByteCount
                 video.imageMap[key.removeSuffix(".matte")] = bitmap.apply { prepareToDraw() }
@@ -194,9 +242,7 @@ class SvgaResource private constructor(private val data: SVGAVideoEntity) {
             }
             video.deferredImageBudget = maxDecodedBytes - pixels
             video.deferredImageSources.values.groupBy { it.frame }.values.forEach { imagesInFrame ->
-                require(imagesInFrame.sumOf { it.width.toLong() * it.height * 4 } <= video.deferredImageBudget) {
-                    "Decoded image budget exceeded"
-                }
+                checkDecodedBudget(imagesInFrame.sumOf { it.width.toLong() * it.height * 4 } <= video.deferredImageBudget)
             }
             val scratch = Path()
             video.spriteList.forEach { sprite -> sprite.frames.forEach { frame ->

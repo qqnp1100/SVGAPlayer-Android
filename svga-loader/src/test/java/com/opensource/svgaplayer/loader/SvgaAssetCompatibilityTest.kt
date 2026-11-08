@@ -14,6 +14,8 @@ import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.ParameterizedRobolectricTestRunner.Parameters
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
+import java.util.zip.InflaterInputStream
 
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
@@ -22,19 +24,40 @@ class SvgaAssetCompatibilityTest(private val name: String, private val progressi
     @get:Rule val temporary = TemporaryFolder()
 
     @Test fun bundledAssetDecodesAndPreparesFirstFrame() = runBlocking {
+        val directory = temporary.newFolder()
         val resource = requireNotNull(javaClass.getResourceAsStream("/$name")).use {
-            SvgaResource.decode(it, temporary.newFolder(), 256, 256,
+            SvgaResource.decode(it, directory, 256, 256,
                 decodeOptions = SvgaDecodeOptions(progressive = progressive, inBitmap = inBitmap))
         }
+        // zlib exports embed their images/audio in the same MovieEntity used by ZIP movie.binary.
+        if (!File(directory, "movie.binary").isFile && !File(directory, "movie.spec").isFile) {
+            InflaterInputStream(requireNotNull(javaClass.getResourceAsStream("/$name"))).use { input ->
+                File(directory, "movie.binary").outputStream().use { input.copyTo(it) }
+            }
+        }
+        val cached = SvgaResource.decodeFromDirectory(directory, 256, 256,
+            decodeOptions = SvgaDecodeOptions(progressive = progressive, inBitmap = inBitmap))
+        assertEquals(resource.frames, cached.frames); assertEquals(resource.fps, cached.fps)
+        assertTrue(directory.deleteRecursively())
         assertTrue(resource.frames > 0)
         val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+        val actual = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
         try {
             resource.newRenderer().use { renderer ->
                 renderer.prepare(256, 256)
                 renderer.draw(Canvas(bitmap), 256, 256, 0, 0)
             }
+            cached.newRenderer().use { renderer ->
+                renderer.prepare(256, 256)
+                renderer.draw(Canvas(actual), 256, 256, 0, 0)
+            }
+            val expectedPixels = IntArray(256 * 256); val actualPixels = IntArray(256 * 256)
+            bitmap.getPixels(expectedPixels, 0, 256, 0, 0, 256, 256)
+            actual.getPixels(actualPixels, 0, 256, 0, 0, 256, 256)
+            assertArrayEquals(expectedPixels, actualPixels)
             assertFalse(resource.hasImageDecodeError)
-        } finally { bitmap.recycle() }
+            assertFalse(cached.hasImageDecodeError)
+        } finally { bitmap.recycle(); actual.recycle() }
     }
 
     companion object {

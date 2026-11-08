@@ -1,6 +1,7 @@
 package com.opensource.svgaplayer.loader
 
 import android.content.ContextWrapper
+import android.content.pm.ApplicationInfo
 import android.content.res.AssetManager
 import com.opensource.svgaplayer.SvgaResource
 import kotlinx.coroutines.*
@@ -84,10 +85,14 @@ class SvgaAssetReadTest {
             if (path != "gift.svga") throw FileNotFoundException(path)
             data.inputStream()
         }
+        val packageFile = temporary.newFile("package.apk")
         val context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
             override fun getApplicationContext() = this
             override fun getCacheDir() = temporary.root
             override fun getAssets() = this@SvgaAssetReadTest.assets
+            override fun getApplicationInfo() = ApplicationInfo(super.getApplicationInfo()).apply {
+                sourceDir = packageFile.absolutePath; splitSourceDirs = null
+            }
         }
         engine = SvgaEngine(context, decodeConcurrency = 1)
     }
@@ -139,25 +144,28 @@ class SvgaAssetReadTest {
         assertEquals(1L, engine.decodeCount.get())
     }
 
-    @Test fun refreshAndMemoryClearEachReadTheAssetOnce() = runBlocking {
+    @Test fun refreshReadsTheAssetButMemoryClearReusesExpandedFiles() = runBlocking {
         val first = engine.acquire(request)
         val refreshed = engine.acquire(request.copy(refresh = true))
         assertNotSame(first, refreshed)
         engine.clearMemory()
         assertNotSame(refreshed, engine.acquire(request))
-        assertEquals(3, tracker.opens.get())
-        assertEquals(3L * data.size, tracker.bytesRead.get())
+        assertEquals(2, tracker.opens.get())
+        assertEquals(2L * data.size, tracker.bytesRead.get())
         assertEquals(3L, engine.decodeCount.get())
+        assertEquals(1L, engine.zipCacheHits.get())
+        assertEquals(2L, engine.zipExtractCount.get())
     }
 
-    @Test fun distinctSizesAndUncachedLoadsEachReadOncePerDecode() = runBlocking {
+    @Test fun distinctSizesShareExpandedFilesButUncachedLoadsReadEachTime() = runBlocking {
         val first = engine.acquire(request.copy(width = 64, height = 64))
         val second = engine.acquire(request.copy(width = 128, height = 128))
         assertNotSame(first, second)
         repeat(2) { engine.acquire(request.copy(cachePolicy = SvgaCachePolicy.NONE)) }
-        assertEquals(4, tracker.opens.get())
-        assertEquals(4L * data.size, tracker.bytesRead.get())
+        assertEquals(3, tracker.opens.get())
+        assertEquals(3L * data.size, tracker.bytesRead.get())
         assertEquals(4L, engine.decodeCount.get())
+        assertEquals(1L, engine.zipCacheHits.get())
     }
 
     @Test fun parsingPreDownloadReadsOnceAndPopulatesMemoryCache() = runBlocking {
